@@ -97,6 +97,7 @@ class Bill(BaseModel):
     cash_received: float = 0.0
     change_given: float = 0.0
     balance_amount: float = 0.0
+    settled: bool = True
     customer_name: str = ""
     customer_phone: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -114,6 +115,7 @@ class BillCreate(BaseModel):
     cash_received: float = 0.0
     change_given: float = 0.0
     balance_amount: float = 0.0
+    settled: bool = True
     customer_name: str = ""
     customer_phone: str = ""
 
@@ -250,7 +252,9 @@ async def delete_held_cart(cart_id: str):
 
 @api_router.post("/bills", response_model=Bill)
 async def create_bill(bill: BillCreate):
-    bill_obj = Bill(**bill.model_dump())
+    bill_data = bill.model_dump()
+    bill_data['settled'] = bill.balance_amount <= 0
+    bill_obj = Bill(**bill_data)
     doc = bill_obj.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.bills.insert_one(doc)
@@ -316,7 +320,64 @@ async def get_bills(
             b['tax_percent'] = 18.0
         if 'balance_amount' not in b:
             b['balance_amount'] = 0.0
+        if 'settled' not in b:
+            b['settled'] = b.get('balance_amount', 0) <= 0
     return bills
+
+@api_router.put("/bills/{bill_id}/settle")
+async def settle_bill(bill_id: str, settled: bool = True):
+    bill = await db.bills.find_one({"id": bill_id}, {"_id": 0})
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    
+    old_settled = bill.get('settled', bill.get('balance_amount', 0) <= 0)
+    balance_amount = bill.get('balance_amount', 0)
+    
+    await db.bills.update_one(
+        {"id": bill_id},
+        {"$set": {"settled": settled}}
+    )
+    
+    # Adjust customer balance based on settlement change
+    if bill.get('customer_phone') and balance_amount > 0 and old_settled != settled:
+        delta = -balance_amount if settled else balance_amount
+        await db.customers.update_one(
+            {"phone": bill['customer_phone']},
+            {"$inc": {"balance": delta}}
+        )
+    
+    return {"message": "Bill settlement updated", "settled": settled}
+
+@api_router.get("/customers/{phone}/bills", response_model=List[Bill])
+async def get_customer_bills(phone: str):
+    bills = await db.bills.find({"customer_phone": phone}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for b in bills:
+        if isinstance(b.get('created_at'), str):
+            b['created_at'] = datetime.fromisoformat(b['created_at'])
+        if 'tax_percent' not in b:
+            b['tax_percent'] = 18.0
+        if 'balance_amount' not in b:
+            b['balance_amount'] = 0.0
+        if 'settled' not in b:
+            b['settled'] = b.get('balance_amount', 0) <= 0
+    return bills
+
+@api_router.put("/customers/{phone}/balance")
+async def update_customer_balance(phone: str, balance: float):
+    result = await db.customers.update_one(
+        {"phone": phone},
+        {"$set": {"balance": max(0, balance)}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"message": "Balance updated", "balance": max(0, balance)}
+
+@api_router.delete("/customers/{phone}")
+async def delete_customer(phone: str):
+    result = await db.customers.delete_one({"phone": phone})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"message": "Customer deleted"}
 
 @api_router.get("/bills/{bill_id}", response_model=Bill)
 async def get_bill(bill_id: str):
@@ -325,6 +386,12 @@ async def get_bill(bill_id: str):
         raise HTTPException(status_code=404, detail="Bill not found")
     if isinstance(bill.get('created_at'), str):
         bill['created_at'] = datetime.fromisoformat(bill['created_at'])
+    if 'tax_percent' not in bill:
+        bill['tax_percent'] = 18.0
+    if 'balance_amount' not in bill:
+        bill['balance_amount'] = 0.0
+    if 'settled' not in bill:
+        bill['settled'] = bill.get('balance_amount', 0) <= 0
     return bill
 
 @api_router.get("/customers", response_model=List[Customer])

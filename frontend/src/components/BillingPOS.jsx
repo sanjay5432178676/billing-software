@@ -16,6 +16,7 @@ const VIEWS = {
   CUSTOMERS: 'customers',
   REPORTS: 'reports',
   BALANCE: 'balance',
+  LOW_STOCK: 'low_stock',
   SETTINGS: 'settings'
 };
 
@@ -46,9 +47,7 @@ const BillingPOS = () => {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [customDiscount, setCustomDiscount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
-  const [paymentMode, setPaymentMode] = useState('full');
-  const [cashReceived, setCashReceived] = useState('');
-  const [balanceAmount, setBalanceAmount] = useState('');
+  const [customerPaid, setCustomerPaid] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   
@@ -57,6 +56,9 @@ const BillingPOS = () => {
   const [billEndDate, setBillEndDate] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [balanceSearch, setBalanceSearch] = useState('');
+  
+  const [customerHistory, setCustomerHistory] = useState(null);
+  const [editingCustomer, setEditingCustomer] = useState(null);
   
   const [notification, setNotification] = useState(null);
   const [showReceipt, setShowReceipt] = useState(null);
@@ -254,38 +256,23 @@ const BillingPOS = () => {
     }
 
     const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
+    const paid = parseFloat(customerPaid) || 0;
     
     let finalBalanceAmount = 0;
     let finalCashReceived = 0;
     let finalChangeGiven = 0;
 
-    if (paymentMode === 'full') {
-      if (paymentMethod === 'Cash') {
-        const received = parseFloat(cashReceived) || 0;
-        if (received < total) {
-          showNotification('Insufficient cash received', 'error');
-          return;
-        }
-        finalCashReceived = received;
-        finalChangeGiven = received - total;
-      }
-    } else if (paymentMode === 'balance') {
-      const balance = parseFloat(balanceAmount) || 0;
-      if (balance > total) {
-        showNotification('Balance cannot exceed total', 'error');
+    if (paid >= total) {
+      finalCashReceived = paid;
+      finalChangeGiven = paid - total;
+      finalBalanceAmount = 0;
+    } else {
+      finalCashReceived = paid;
+      finalBalanceAmount = total - paid;
+      finalChangeGiven = 0;
+      if (!customerPhone) {
+        showNotification('Customer phone required for partial payment', 'error');
         return;
-      }
-      finalBalanceAmount = balance;
-      
-      if (paymentMethod === 'Cash') {
-        const amountToPay = total - balance;
-        const received = parseFloat(cashReceived) || 0;
-        if (received < amountToPay) {
-          showNotification('Insufficient cash received', 'error');
-          return;
-        }
-        finalCashReceived = received;
-        finalChangeGiven = received - amountToPay;
       }
     }
 
@@ -303,6 +290,7 @@ const BillingPOS = () => {
         cash_received: finalCashReceived,
         change_given: finalChangeGiven,
         balance_amount: finalBalanceAmount,
+        settled: finalBalanceAmount <= 0,
         customer_name: customerName,
         customer_phone: customerPhone
       };
@@ -314,9 +302,7 @@ const BillingPOS = () => {
       setCart([]);
       setDiscountPercent(0);
       setCustomDiscount('');
-      setCashReceived('');
-      setBalanceAmount('');
-      setPaymentMode('full');
+      setCustomerPaid('');
       setCustomerName('');
       setCustomerPhone('');
       
@@ -434,6 +420,77 @@ const BillingPOS = () => {
     window.open(`https://wa.me/${customer.phone}?text=${message}`, '_blank');
   };
 
+  const sendBillViaWhatsApp = (bill) => {
+    const itemList = bill.items.map(i => `${i.name} x${i.quantity} = ${formatCurrency(i.price * i.quantity)}`).join('\n');
+    const message = encodeURIComponent(
+      `🧾 *${settings.shop_name}*\n\n*Invoice:* ${bill.invoice_no}\n*Date:* ${new Date(bill.created_at).toLocaleString()}\n\n*Items:*\n${itemList}\n\n*Subtotal:* ${formatCurrency(bill.subtotal)}\n*Discount:* ${formatCurrency(bill.discount_amount)}\n*GST (${bill.tax_percent}%):* ${formatCurrency(bill.tax_amount)}\n*Total:* ${formatCurrency(bill.total)}\n${bill.balance_amount > 0 ? `*Balance Due:* ${formatCurrency(bill.balance_amount)}\n` : ''}\nPayment: ${bill.payment_method}\n\nThank you for your business!`
+    );
+    window.open(`https://wa.me/${bill.customer_phone}?text=${message}`, '_blank');
+  };
+
+  const viewCustomerHistory = async (customer) => {
+    try {
+      const res = await axios.get(`${API}/customers/${customer.phone}/bills`);
+      setCustomerHistory({ customer, bills: res.data });
+    } catch (error) {
+      showNotification('Error loading customer history', 'error');
+    }
+  };
+
+  const toggleBillSettled = async (bill) => {
+    try {
+      await axios.put(`${API}/bills/${bill.id}/settle`, null, {
+        params: { settled: !bill.settled }
+      });
+      showNotification(`Bill marked as ${!bill.settled ? 'settled' : 'not settled'}`, 'success');
+      if (customerHistory) {
+        const res = await axios.get(`${API}/customers/${customerHistory.customer.phone}/bills`);
+        setCustomerHistory({ ...customerHistory, bills: res.data });
+      }
+      await loadData();
+    } catch (error) {
+      showNotification('Error updating bill', 'error');
+    }
+  };
+
+  const handleUpdateCustomerBalance = async () => {
+    if (!editingCustomer) return;
+    try {
+      await axios.put(`${API}/customers/${editingCustomer.phone}/balance`, null, {
+        params: { balance: parseFloat(editingCustomer.balance) || 0 }
+      });
+      showNotification('Balance updated', 'success');
+      setEditingCustomer(null);
+      await loadData();
+    } catch (error) {
+      showNotification('Error updating balance', 'error');
+    }
+  };
+
+  const handleDeleteCustomer = async (phone) => {
+    if (!window.confirm('Delete this customer? This action cannot be undone.')) return;
+    try {
+      await axios.delete(`${API}/customers/${phone}`);
+      showNotification('Customer deleted', 'success');
+      await loadData();
+    } catch (error) {
+      showNotification('Error deleting customer', 'error');
+    }
+  };
+
+  const exportBalance = () => {
+    const data = balanceCustomers.map(c => ({
+      'Name': c.name,
+      'Phone': c.phone,
+      'Balance': c.balance || 0,
+      'Total Purchases': c.total_purchases,
+      'Visits': c.visit_count,
+      'Since': new Date(c.created_at).toLocaleDateString()
+    }));
+    exportToExcel(data, 'balance-report');
+    showNotification('Balance exported to Excel', 'success');
+  };
+
   const exportToExcel = (data, filename) => {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -531,6 +588,7 @@ const BillingPOS = () => {
             { id: VIEWS.BILLS, icon: '🧾', label: 'Bill History' },
             { id: VIEWS.CUSTOMERS, icon: '👥', label: 'Customers' },
             { id: VIEWS.BALANCE, icon: '💰', label: 'Balance' },
+            { id: VIEWS.LOW_STOCK, icon: '⚠️', label: 'Low Stock' },
             { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
             { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
           ].map(item => (
@@ -547,8 +605,12 @@ const BillingPOS = () => {
         </nav>
 
         {lowStockProducts.length > 0 && (
-          <div className="low-stock-alert">
-            <div className="alert-header">⚠️ LOW STOCK</div>
+          <div
+            className="low-stock-alert clickable"
+            data-testid="low-stock-alert"
+            onClick={() => { setView(VIEWS.LOW_STOCK); setSidebarOpen(false); }}
+          >
+            <div className="alert-header">⚠️ LOW STOCK ({lowStockProducts.length})</div>
             <div className="alert-content">
               {lowStockProducts.slice(0, 3).map(p => (
                 <div key={p.id} className="alert-item">
@@ -556,7 +618,7 @@ const BillingPOS = () => {
                 </div>
               ))}
               {lowStockProducts.length > 3 && (
-                <div className="alert-more">+{lowStockProducts.length - 3} more</div>
+                <div className="alert-more">+{lowStockProducts.length - 3} more (click to view)</div>
               )}
             </div>
           </div>
@@ -783,41 +845,6 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
-                  <div className="payment-mode-section">
-                    <div className="section-label">Payment Mode:</div>
-                    <div className="payment-mode-btns">
-                      <button
-                        className={`btn ${paymentMode === 'full' ? 'btn-primary' : ''}`}
-                        onClick={() => setPaymentMode('full')}
-                      >
-                        Full Payment
-                      </button>
-                      <button
-                        className={`btn ${paymentMode === 'balance' ? 'btn-primary' : ''}`}
-                        onClick={() => setPaymentMode('balance')}
-                      >
-                        Balance
-                      </button>
-                    </div>
-                  </div>
-
-                  {paymentMode === 'balance' && (
-                    <div className="balance-section">
-                      <input
-                        className="input"
-                        placeholder="Balance Amount"
-                        type="number"
-                        value={balanceAmount}
-                        onChange={(e) => setBalanceAmount(e.target.value)}
-                      />
-                      {balanceAmount && (
-                        <div className="balance-info">
-                          Amount to Pay: {formatCurrency(calculateBill().total - parseFloat(balanceAmount || 0))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   <div className="payment-section">
                     <div className="section-label">Payment Method:</div>
                     <div className="payment-methods">
@@ -834,23 +861,26 @@ const BillingPOS = () => {
                     </div>
                   </div>
 
-                  {paymentMethod === 'Cash' && (
-                    <div className="cash-section">
-                      <input
-                        data-testid="cash-received-input"
-                        className="input"
-                        placeholder="Cash Received"
-                        type="number"
-                        value={cashReceived}
-                        onChange={(e) => setCashReceived(e.target.value)}
-                      />
-                      {cashReceived && (
-                        <div className="change-info">
-                          Change: {formatCurrency(Math.max(0, parseFloat(cashReceived) - (paymentMode === 'balance' ? calculateBill().total - parseFloat(balanceAmount || 0) : calculateBill().total)))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="cash-section">
+                    <div className="section-label">Customer Paid Amount:</div>
+                    <input
+                      data-testid="customer-paid-input"
+                      className="input"
+                      placeholder="Enter amount paid by customer"
+                      type="number"
+                      value={customerPaid}
+                      onChange={(e) => setCustomerPaid(e.target.value)}
+                    />
+                    {customerPaid && (() => {
+                      const { total } = calculateBill();
+                      const paid = parseFloat(customerPaid) || 0;
+                      if (paid >= total) {
+                        return <div className="change-info">Change: {formatCurrency(paid - total)}</div>;
+                      } else {
+                        return <div className="balance-info balance-text">Balance Due: {formatCurrency(total - paid)}</div>;
+                      }
+                    })()}
+                  </div>
 
                   <div className="cart-actions">
                     <button
@@ -871,6 +901,88 @@ const BillingPOS = () => {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Low Stock View */}
+        {view === VIEWS.LOW_STOCK && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Low Stock Products</h2>
+              <button className="btn btn-primary" onClick={() => exportToExcel(
+                lowStockProducts.map(p => ({
+                  'Name': p.name,
+                  'Category': p.category,
+                  'Stock': p.stock,
+                  'Price': p.price,
+                  'Barcode': p.barcode,
+                  'Unit': p.unit,
+                  'HSN': p.hsn_code
+                })), 'low-stock-products'
+              )}>Export to Excel</button>
+            </div>
+            
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-label">Total Low Stock Items</div>
+                <div className="stat-value balance-text">{lowStockProducts.length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Out of Stock Items</div>
+                <div className="stat-value" style={{ color: 'var(--danger)' }}>
+                  {products.filter(p => p.stock === 0).length}
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Threshold</div>
+                <div className="stat-value">≤ {settings.low_stock_threshold}</div>
+              </div>
+            </div>
+
+            {lowStockProducts.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+                <h3 className="card-title">🎉 All Good!</h3>
+                <p>No products are currently below the low stock threshold.</p>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Product Name</th>
+                      <th>Category</th>
+                      <th>Current Stock</th>
+                      <th>Price</th>
+                      <th>Barcode</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lowStockProducts.map(p => (
+                      <tr key={p.id} data-testid={`low-stock-row-${p.barcode}`}>
+                        <td><strong>{p.name}</strong></td>
+                        <td>
+                          <span className="tag" style={{ background: getCategoryColor(p.category) }}>
+                            {p.category}
+                          </span>
+                        </td>
+                        <td className="balance-text">{p.stock} {p.unit}</td>
+                        <td>{formatCurrency(p.price)}</td>
+                        <td>{p.barcode}</td>
+                        <td>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={() => setEditProduct(p)}
+                          >
+                            Restock
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -1159,6 +1271,7 @@ const BillingPOS = () => {
           <div className="content-view">
             <div className="view-header">
               <h2 className="section-title">Customer Balance Management</h2>
+              <button className="btn btn-primary" onClick={exportBalance}>Export to Excel</button>
             </div>
             
             <div className="filters-bar">
@@ -1189,9 +1302,9 @@ const BillingPOS = () => {
                   <tr>
                     <th>Name</th>
                     <th>Phone</th>
-                    <th>Balance Amount</th>
+                    <th>Balance</th>
                     <th>Total Purchases</th>
-                    <th>Last Visit</th>
+                    <th>Visits</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -1204,18 +1317,41 @@ const BillingPOS = () => {
                     )
                     .map(customer => (
                       <tr key={customer.id}>
-                        <td>{customer.name}</td>
+                        <td><strong>{customer.name}</strong></td>
                         <td>{customer.phone}</td>
                         <td className="balance-text">{formatCurrency(customer.balance)}</td>
                         <td className="amount-text">{formatCurrency(customer.total_purchases)}</td>
-                        <td>{new Date(customer.created_at).toLocaleDateString()}</td>
+                        <td>{customer.visit_count}</td>
                         <td>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => sendWhatsAppReminder(customer)}
-                          >
-                            📱 WhatsApp Reminder
-                          </button>
+                          <div className="table-actions" style={{ flexWrap: 'wrap' }}>
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => viewCustomerHistory(customer)}
+                              data-testid={`history-${customer.phone}`}
+                            >
+                              📋 History
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => setEditingCustomer({ ...customer })}
+                              data-testid={`edit-balance-${customer.phone}`}
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => sendWhatsAppReminder(customer)}
+                            >
+                              📱 WhatsApp
+                            </button>
+                            <button
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleDeleteCustomer(customer.phone)}
+                              data-testid={`delete-customer-${customer.phone}`}
+                            >
+                              🗑️ Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1631,6 +1767,123 @@ const BillingPOS = () => {
               <button data-testid="save-product-btn" className="btn btn-primary" onClick={handleUpdateProduct}>
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Customer History Modal */}
+      {customerHistory && (
+        <div className="modal-overlay" onClick={() => setCustomerHistory(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900 }} data-testid="customer-history-modal">
+            <div className="view-header">
+              <div>
+                <h3 className="modal-title">{customerHistory.customer.name}</h3>
+                <div className="sub-text">{customerHistory.customer.phone}</div>
+              </div>
+              <button className="btn btn-sm" onClick={() => setCustomerHistory(null)}>✕ Close</button>
+            </div>
+
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Total Bills</div>
+                <div className="stat-value">{customerHistory.bills.length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Current Balance</div>
+                <div className="stat-value balance-text">{formatCurrency(customerHistory.customer.balance || 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Spent</div>
+                <div className="stat-value amount-text">{formatCurrency(customerHistory.customer.total_purchases)}</div>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerHistory.bills.map(bill => (
+                    <tr key={bill.id}>
+                      <td className="invoice-no">{bill.invoice_no}</td>
+                      <td>{new Date(bill.created_at).toLocaleDateString()}</td>
+                      <td className="amount-text">{formatCurrency(bill.total)}</td>
+                      <td className={bill.balance_amount > 0 ? 'balance-text' : ''}>
+                        {formatCurrency(bill.balance_amount || 0)}
+                      </td>
+                      <td>
+                        <span className="tag" style={{
+                          background: bill.settled ? 'var(--success)' : 'var(--warning)',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => toggleBillSettled(bill)}
+                        data-testid={`settle-toggle-${bill.invoice_no}`}>
+                          {bill.settled ? '✓ Settled' : '⏱ Not Settled'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="table-actions" style={{ flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => setShowReceipt(bill)}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={() => sendBillViaWhatsApp(bill)}
+                            data-testid={`whatsapp-bill-${bill.invoice_no}`}
+                          >
+                            📱 Send Bill
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Balance Modal */}
+      {editingCustomer && (
+        <div className="modal-overlay" onClick={() => setEditingCustomer(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }} data-testid="edit-balance-modal">
+            <h3 className="modal-title">Edit Customer Balance</h3>
+            <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+              <div className="form-group">
+                <label>Customer Name</label>
+                <input className="input" value={editingCustomer.name} disabled />
+              </div>
+              <div className="form-group">
+                <label>Phone</label>
+                <input className="input" value={editingCustomer.phone} disabled />
+              </div>
+              <div className="form-group">
+                <label>Balance Amount</label>
+                <input
+                  data-testid="edit-balance-input"
+                  className="input"
+                  type="number"
+                  value={editingCustomer.balance}
+                  onChange={(e) => setEditingCustomer({ ...editingCustomer, balance: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setEditingCustomer(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleUpdateCustomerBalance} data-testid="save-balance-btn">Save</button>
             </div>
           </div>
         </div>

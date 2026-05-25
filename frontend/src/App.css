@@ -149,6 +149,17 @@ body {
   border: 1px solid var(--warning);
 }
 
+.low-stock-alert.clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.low-stock-alert.clickable:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 166, 35, 0.2);
+}
+
 .alert-header {
   color: var(--warning);
   font-size: 12px;

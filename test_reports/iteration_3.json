@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 3 - tested all 9 new features end-to-end. Created backend test_pos_features_v3.py with 13 tests (100% pass). Verified full regression: 41/41 tests pass (v1+v2+v3). Frontend verified via Playwright: Low Stock view, simplified POS Customer Paid input with auto Balance/Change calc, Balance page Edit/Delete/History buttons, Customer History modal with settle toggle + WhatsApp + Excel export. WhatsApp URL captured contains correctly formatted bill message. All flows working as designed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pos_features_v3.py",
+    "/app/backend/tests/test_pos_features_v2.py",
+    "/app/backend/tests/test_pos_api.py",
+    "/app/test_reports/pytest/features_v3.xml",
+    "/app/test_reports/pytest/all_v3.xml"
+  ],
+  "action_items": [
+    "(non-blocking) BillingPOS.jsx now ~1906 lines (was 1640) — strongly recommend splitting into POS / LowStock / Balance / CustomerHistoryModal / EditBalanceModal / Inventory / Bills / Reports / Settings sub-components. Single-file size is the biggest maintainability risk.",
+    "(non-blocking) Stock can still go negative on checkout — existing issue from iteration 1/2, no backend validation.",
+    "(non-blocking) PUT /bills/{id}/settle, PUT /customers/{phone}/balance, POST /customers/{phone}/pay-balance, DELETE /customers/{phone} all use query params instead of JSON body; works but unusual.",
+    "(non-blocking) PUT /customers/{phone}/balance silently clamps negatives to 0 instead of 400 — fine UX but consider 400 with message."
+  ],
+  "critical_code_review_comments": [
+    "BillingPOS.jsx is 1906 lines — exceeds the 700-line file-size guideline by 2.7x. Split urgently for maintainability.",
+    "settle_bill() in server.py reads `old_settled` correctly but assumes balance_amount in DB is positive; if balance was already 0 the toggle does nothing to customer balance (correct), but if a bill's balance_amount was edited externally to negative this would over-credit. Defensive: clamp delta computation.",
+    "delete_customer() does NOT cascade-delete or settle the customer's bills. Orphan bills with customer_phone pointing to deleted customer remain in DB. Acceptable for audit trail but worth documenting.",
+    "Frontend exportBalance/exportToExcel uses file-saver+xlsx — works in Playwright (low-stock export captured). No issue found.",
+    "sendBillViaWhatsApp uses `new Date(bill.created_at).toLocaleString()` which uses browser locale — fine for India but inconsistent across users. Consider formatting in shop's timezone.",
+    "server.py still uses deprecated @app.on_event('shutdown') — migrate to lifespan. (Carried over from iteration 2)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pos_features_v3.py (new — 13 tests for settled field, settle endpoint, customer bills, balance PUT, customer DELETE, partial vs full payment)"
+  ],
+  "success_rate": {"backend": "100% (13/13 new v3 tests; 41/41 cumulative)", "frontend": "100% (all 9 new UI flows verified)"},
+  "test_credentials": "N/A - no auth",
+  "seed_data_creation": "Tests created TEST_V3, TEST_Settle, TEST_Hist, TEST_BalUpd, TEST_Del, TEST_PP, TEST_Full prefixed customers; some remain in DB.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All v3 features green. Backend has 41 pytest tests across 3 files in /app/backend/tests/. Frontend test IDs in use: nav-low_stock, low-stock-alert, customer-paid-input, history-{phone}, edit-balance-{phone}, delete-customer-{phone}, customer-history-modal, edit-balance-modal, edit-balance-input, save-balance-btn, settle-toggle-{invoice}, whatsapp-bill-{invoice}, low-stock-row-{barcode}. BillingPOS.jsx is now 1906 lines and SHOULD be split before adding more features. WhatsApp opens wa.me link via window.open with full formatted bill message (verified URL contains shop name, invoice, items, subtotal, discount, GST, total, balance due, payment method). Settle toggle on bill correctly adjusts customer.balance with proper old_settled comparison (idempotent — clicking same state again does nothing).",
+  "verification_details": {
+    "endpoints_verified": [
+      "PUT /api/bills/{id}/settle?settled=true|false — 200 + adjusts customer.balance by ±balance_amount only on state change",
+      "GET /api/customers/{phone}/bills — returns all bills sorted desc, with backfilled settled/balance_amount/tax_percent",
+      "PUT /api/customers/{phone}/balance?balance=N — clamps negative to 0, 404 if not found",
+      "DELETE /api/customers/{phone} — 200 success, 404 if not found",
+      "POST /api/bills — auto-sets settled = (balance_amount <= 0) regardless of payload value (overrides client)"
+    ],
+    "ui_flows_verified": [
+      "POS: Customer Paid Amount input replaces Cash Received (cash-received-input testid is gone)",
+      "POS: Entering < total shows 'Balance Due: ₹X' inline; entering >= total shows 'Change: ₹X'",
+      "POS: Partial payment without phone blocked by handleCheckout() with notification 'Customer phone required for partial payment' (code verified at line 273)",
+      "Sidebar: low-stock-alert clickable navigates to Low Stock view; new nav-low_stock item visible",
+      "Low Stock view: Stats cards (Total Low Stock=2, Out of Stock=0, Threshold≤5), Restock buttons, Export to Excel downloads low-stock-products.xlsx",
+      "Balance page: 11 customers with balance shown with Edit/Delete/History/WhatsApp/Export to Excel actions",
+      "Customer History modal: Shows customer info, stats (Total Bills, Current Balance, Total Spent), bill rows with Settle toggle and Send Bill button",
+      "Settle toggle: '⏱ NOT SETTLED' → '✓ SETTLED' on click; backend bill.settled flipped to true; customer.balance decremented by balance_amount",
+      "WhatsApp Send Bill: window.open called with full https://wa.me/{phone}?text=... URL containing shop name, invoice, date, items, subtotal, discount, GST, total, balance due, payment method",
+      "Edit Balance modal: Opens with current balance pre-filled, save persists via PUT /api/customers/{phone}/balance"
+    ]
+  }
+}
