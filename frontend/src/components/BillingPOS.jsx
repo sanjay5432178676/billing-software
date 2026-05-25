@@ -1044,42 +1044,57 @@ const BillingPOS = () => {
             <div className="card" style={{ maxWidth: 600, marginBottom: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, color: '#f5a623' }}>Shop Information</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <input
-                  data-testid="settings-shop-name"
-                  className="input"
-                  placeholder="Shop Name"
-                  value={settings.shop_name}
-                  onChange={(e) => setSettings({ ...settings, shop_name: e.target.value })}
-                />
-                <input
-                  data-testid="settings-gstin"
-                  className="input"
-                  placeholder="GSTIN"
-                  value={settings.gstin}
-                  onChange={(e) => setSettings({ ...settings, gstin: e.target.value })}
-                />
-                <input
-                  data-testid="settings-address"
-                  className="input"
-                  placeholder="Address"
-                  value={settings.address}
-                  onChange={(e) => setSettings({ ...settings, address: e.target.value })}
-                />
-                <input
-                  data-testid="settings-phone"
-                  className="input"
-                  placeholder="Phone"
-                  value={settings.phone}
-                  onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                />
-                <input
-                  data-testid="settings-email"
-                  className="input"
-                  placeholder="Email"
-                  type="email"
-                  value={settings.email}
-                  onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                />
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Shop Name</label>
+                  <input
+                    data-testid="settings-shop-name"
+                    className="input"
+                    placeholder="Shop Name"
+                    value={settings.shop_name}
+                    onChange={(e) => setSettings({ ...settings, shop_name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>GSTIN</label>
+                  <input
+                    data-testid="settings-gstin"
+                    className="input"
+                    placeholder="GSTIN"
+                    value={settings.gstin}
+                    onChange={(e) => setSettings({ ...settings, gstin: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Address</label>
+                  <input
+                    data-testid="settings-address"
+                    className="input"
+                    placeholder="Address"
+                    value={settings.address}
+                    onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Phone</label>
+                  <input
+                    data-testid="settings-phone"
+                    className="input"
+                    placeholder="Phone"
+                    value={settings.phone}
+                    onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Email</label>
+                  <input
+                    data-testid="settings-email"
+                    className="input"
+                    placeholder="Email"
+                    type="email"
+                    value={settings.email}
+                    onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                  />
+                </div>
               </div>
             </div>
 
