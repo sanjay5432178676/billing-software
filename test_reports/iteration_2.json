@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 2 - tested 13 new POS features (custom GST, software name, bill search/date filter, customer search, balance mgmt with WhatsApp reminder, Excel export, reports date range, theme toggle, mobile responsive). Found and FIXED a critical backend bug where Customer Pydantic model was missing the `balance` field. Also added missing `search` query param to GET /api/customers. After fix, all 12 new feature backend tests pass (100%) and frontend flows verified end-to-end including mobile drawer.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "Customer model", "issue": "FIXED by testing agent — Customer model lacked `balance: float = 0.0` field; due to `extra='ignore'`, all `Customer(balance=...)` calls dropped balance silently for new customers, and `response_model=List[Customer]` stripped balance from /api/customers and /api/customers/balance responses. Pay-balance returned new_balance=0 for new customers."},
+      {"endpoint": "GET /api/customers", "issue": "FIXED — Was missing `search` query parameter though frontend sends it. Added regex search on name/phone."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pos_features_v2.py",
+    "/app/backend/tests/test_pos_api.py",
+    "/app/test_reports/pytest/features_v2.xml"
+  ],
+  "action_items": [
+    "Pre-seeded 24 products got reduced to 5 products in DB (existing data was deleted between iterations); main agent may want to re-seed by manually clearing collection and POST /api/seed if 24 products are required. Not a code bug.",
+    "Stock can go negative on checkout (no validation) — existing issue from iteration 1, still present.",
+    "Reports query mixes timezone-aware vs naive ISO strings ($gte comparison) — works because all created_at strings are timezone-aware ISO; fragile if any code writes naive datetimes."
+  ],
+  "critical_code_review_comments": [
+    "BillingPOS.jsx is ~1640 lines — should be split into POS / Inventory / Bills / Customers / Balance / Reports / Settings sub-components for maintainability.",
+    "server.py still uses deprecated @app.on_event('shutdown'); migrate to FastAPI lifespan handlers.",
+    "POST /api/customers/{phone}/pay-balance accepts `amount` as a query param (not body) — unusual; consider JSON body with Pydantic validation.",
+    "No backend validation prevents negative `balance_amount` or balance_amount > total when creating bills (frontend enforces, backend trusts).",
+    "Initial useEffect sets software_name from default state ('POS System'); the loadData() then overrides — brief flash of default value on every reload. Consider showing a loader or default to empty string.",
+    "Theme attribute set twice in useEffects (lines 78 and 106) — first one is redundant since second runs on mount too."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (added Customer.balance field; added `search` param to GET /api/customers)",
+    "/app/backend/tests/test_pos_features_v2.py (new — 12 tests covering all new features)"
+  ],
+  "success_rate": {"backend": "100% (12/12 on new features after fix; 13/16 on iteration_1 tests — 3 failures only due to seed data being reduced from 24 to 5 products, unrelated to code)", "frontend": "100% (all 13 new feature flows verified)"},
+  "test_credentials": "Not applicable - no auth",
+  "seed_data_creation": "Tests created TEST_ prefixed customers/bills with balances; some remain in DB. No cleanup needed for these.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 added `balance: float = 0.0` to Customer model in server.py — this was the root cause of customer balance not surfacing. Also added search param to GET /api/customers. All v2 features verified end-to-end. Frontend BillingPOS.jsx briefly shows 'POS System' default on reload before async settings fetch completes — test must wait ~500ms before checking .logo text. Mobile drawer works (tested at 390x844). Theme toggle persists via localStorage.",
+  "rca_of_the_issue": "Customer Pydantic model was created with name/phone/total_purchases/visit_count/created_at but `balance` was never declared. Because Customer uses `ConfigDict(extra='ignore')`, the kwarg `balance=bill.balance_amount` in /api/bills handler (line 280) was silently discarded — new customers were inserted into MongoDB without the balance field. Existing customers got balance updated via `$set` raw operation (line 271), so balance was present in MongoDB but stripped from API responses by `response_model=List[Customer]`. Fix: added `balance: float = 0.0` to Customer model. After fix, /api/customers/balance correctly returns customers with outstanding balance, and pay-balance correctly decrements."
+}

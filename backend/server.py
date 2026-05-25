@@ -72,6 +72,7 @@ class Customer(BaseModel):
     phone: str
     total_purchases: float = 0.0
     visit_count: int = 0
+    balance: float = 0.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BillItem(BaseModel):
@@ -90,10 +91,12 @@ class Bill(BaseModel):
     discount_percent: float
     discount_amount: float
     tax_amount: float
+    tax_percent: float = 18.0
     total: float
     payment_method: str
     cash_received: float = 0.0
     change_given: float = 0.0
+    balance_amount: float = 0.0
     customer_name: str = ""
     customer_phone: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -105,10 +108,12 @@ class BillCreate(BaseModel):
     discount_percent: float
     discount_amount: float
     tax_amount: float
+    tax_percent: float = 18.0
     total: float
     payment_method: str
     cash_received: float = 0.0
     change_given: float = 0.0
+    balance_amount: float = 0.0
     customer_name: str = ""
     customer_phone: str = ""
 
@@ -116,21 +121,25 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = "settings"
     shop_name: str = "My Shop"
+    software_name: str = "POS System"
     gstin: str = ""
     address: str = ""
     phone: str = ""
     email: str = ""
     tax_enabled: bool = True
+    tax_percent: float = 18.0
     auto_print: bool = False
     low_stock_threshold: int = 10
 
 class SettingsUpdate(BaseModel):
     shop_name: Optional[str] = None
+    software_name: Optional[str] = None
     gstin: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     tax_enabled: Optional[bool] = None
+    tax_percent: Optional[float] = None
     auto_print: Optional[bool] = None
     low_stock_threshold: Optional[int] = None
 
@@ -255,11 +264,12 @@ async def create_bill(bill: BillCreate):
     if bill.customer_phone:
         customer = await db.customers.find_one({"phone": bill.customer_phone}, {"_id": 0})
         if customer:
+            new_balance = customer.get('balance', 0.0) + bill.balance_amount
             await db.customers.update_one(
                 {"phone": bill.customer_phone},
                 {
                     "$inc": {"total_purchases": bill.total, "visit_count": 1},
-                    "$set": {"name": bill.customer_name}
+                    "$set": {"name": bill.customer_name, "balance": new_balance}
                 }
             )
         else:
@@ -267,7 +277,8 @@ async def create_bill(bill: BillCreate):
                 name=bill.customer_name,
                 phone=bill.customer_phone,
                 total_purchases=bill.total,
-                visit_count=1
+                visit_count=1,
+                balance=bill.balance_amount
             )
             customer_doc = new_customer.model_dump()
             customer_doc['created_at'] = customer_doc['created_at'].isoformat()
@@ -276,11 +287,35 @@ async def create_bill(bill: BillCreate):
     return bill_obj
 
 @api_router.get("/bills", response_model=List[Bill])
-async def get_bills():
-    bills = await db.bills.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def get_bills(
+    search: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    query = {}
+    
+    if search:
+        query['$or'] = [
+            {'invoice_no': {'$regex': search, '$options': 'i'}},
+            {'customer_name': {'$regex': search, '$options': 'i'}},
+            {'customer_phone': {'$regex': search, '$options': 'i'}}
+        ]
+    
+    if start_date:
+        query['created_at'] = {'$gte': start_date}
+    if end_date:
+        if 'created_at' not in query:
+            query['created_at'] = {}
+        query['created_at']['$lte'] = end_date
+    
+    bills = await db.bills.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     for b in bills:
         if isinstance(b.get('created_at'), str):
             b['created_at'] = datetime.fromisoformat(b['created_at'])
+        if 'tax_percent' not in b:
+            b['tax_percent'] = 18.0
+        if 'balance_amount' not in b:
+            b['balance_amount'] = 0.0
     return bills
 
 @api_router.get("/bills/{bill_id}", response_model=Bill)
@@ -293,19 +328,57 @@ async def get_bill(bill_id: str):
     return bill
 
 @api_router.get("/customers", response_model=List[Customer])
-async def get_customers():
-    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+async def get_customers(search: Optional[str] = None):
+    query = {}
+    if search:
+        query['$or'] = [
+            {'name': {'$regex': search, '$options': 'i'}},
+            {'phone': {'$regex': search, '$options': 'i'}}
+        ]
+    customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
     for c in customers:
         if isinstance(c.get('created_at'), str):
             c['created_at'] = datetime.fromisoformat(c['created_at'])
     return customers
 
+@api_router.get("/customers/balance", response_model=List[Customer])
+async def get_customers_with_balance():
+    customers = await db.customers.find({"balance": {"$gt": 0}}, {"_id": 0}).to_list(1000)
+    for c in customers:
+        if isinstance(c.get('created_at'), str):
+            c['created_at'] = datetime.fromisoformat(c['created_at'])
+        if 'balance' not in c:
+            c['balance'] = 0.0
+    return customers
+
+@api_router.post("/customers/{phone}/pay-balance")
+async def pay_customer_balance(phone: str, amount: float):
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    current_balance = customer.get('balance', 0.0)
+    new_balance = max(0, current_balance - amount)
+    
+    await db.customers.update_one(
+        {"phone": phone},
+        {"$set": {"balance": new_balance}}
+    )
+    
+    return {"message": "Balance updated", "new_balance": new_balance}
+
 @api_router.get("/reports/summary")
-async def get_report_summary(period: str = "all"):
+async def get_report_summary(
+    period: str = "all",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
     from datetime import timedelta
     
     query = {}
-    if period != "all":
+    if start_date and end_date:
+        query['created_at'] = {"$gte": start_date, "$lte": end_date}
+    elif period != "all":
         now = datetime.now(timezone.utc)
         if period == "today":
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)

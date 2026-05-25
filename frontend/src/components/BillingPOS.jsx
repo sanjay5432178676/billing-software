@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const TAX_RATE = 0.18;
 const DISCOUNT_OPTIONS = [0, 5, 10, 15, 20];
 const CATEGORIES = ['All', 'Food', 'Beverages', 'Electronics', 'Clothing', 'Medicines', 'Stationery'];
 const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Credit', 'Wallet'];
@@ -14,10 +15,12 @@ const VIEWS = {
   BILLS: 'bills',
   CUSTOMERS: 'customers',
   REPORTS: 'reports',
+  BALANCE: 'balance',
   SETTINGS: 'settings'
 };
 
 const BillingPOS = () => {
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [view, setView] = useState(VIEWS.POS);
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
@@ -26,11 +29,13 @@ const BillingPOS = () => {
   const [customers, setCustomers] = useState([]);
   const [settings, setSettings] = useState({
     shop_name: 'My Shop',
+    software_name: 'POS System',
     gstin: '',
     address: '',
     phone: '',
     email: '',
     tax_enabled: true,
+    tax_percent: 18,
     auto_print: false,
     low_stock_threshold: 10
   });
@@ -41,9 +46,17 @@ const BillingPOS = () => {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [customDiscount, setCustomDiscount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paymentMode, setPaymentMode] = useState('full');
   const [cashReceived, setCashReceived] = useState('');
+  const [balanceAmount, setBalanceAmount] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  
+  const [billSearch, setBillSearch] = useState('');
+  const [billStartDate, setBillStartDate] = useState('');
+  const [billEndDate, setBillEndDate] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [balanceSearch, setBalanceSearch] = useState('');
   
   const [notification, setNotification] = useState(null);
   const [showReceipt, setShowReceipt] = useState(null);
@@ -52,13 +65,17 @@ const BillingPOS = () => {
     name: '', category: 'Food', price: '', stock: '', barcode: '', unit: 'pcs', hsn_code: ''
   });
   const [reportPeriod, setReportPeriod] = useState('all');
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
   const [reportData, setReportData] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const barcodeRef = useRef(null);
 
   useEffect(() => {
     loadData();
     seedDataIfEmpty();
+    document.documentElement.setAttribute('data-theme', theme);
   }, []);
 
   useEffect(() => {
@@ -71,7 +88,24 @@ const BillingPOS = () => {
     if (view === VIEWS.REPORTS) {
       fetchReportData();
     }
-  }, [view, reportPeriod]);
+  }, [view, reportPeriod, reportStartDate, reportEndDate]);
+
+  useEffect(() => {
+    if (view === VIEWS.BILLS) {
+      fetchBills();
+    }
+  }, [view, billSearch, billStartDate, billEndDate]);
+
+  useEffect(() => {
+    if (view === VIEWS.CUSTOMERS) {
+      fetchCustomers();
+    }
+  }, [view, customerSearch]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   const loadData = async () => {
     try {
@@ -103,10 +137,40 @@ const BillingPOS = () => {
 
   const fetchReportData = async () => {
     try {
-      const res = await axios.get(`${API}/reports/summary`, { params: { period: reportPeriod } });
+      const params = {};
+      if (reportStartDate && reportEndDate) {
+        params.start_date = new Date(reportStartDate).toISOString();
+        params.end_date = new Date(reportEndDate + 'T23:59:59').toISOString();
+      } else {
+        params.period = reportPeriod;
+      }
+      const res = await axios.get(`${API}/reports/summary`, { params });
       setReportData(res.data);
     } catch (error) {
       showNotification('Error fetching report', 'error');
+    }
+  };
+
+  const fetchBills = async () => {
+    try {
+      const params = {};
+      if (billSearch) params.search = billSearch;
+      if (billStartDate) params.start_date = new Date(billStartDate).toISOString();
+      if (billEndDate) params.end_date = new Date(billEndDate + 'T23:59:59').toISOString();
+      const res = await axios.get(`${API}/bills`, { params });
+      setBills(res.data);
+    } catch (error) {
+      showNotification('Error fetching bills', 'error');
+    }
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const params = customerSearch ? { search: customerSearch } : {};
+      const res = await axios.get(`${API}/customers`, { params });
+      setCustomers(res.data);
+    } catch (error) {
+      showNotification('Error fetching customers', 'error');
     }
   };
 
@@ -177,7 +241,7 @@ const BillingPOS = () => {
     const discount = parseFloat(customDiscount) || discountPercent;
     const discountAmount = subtotal * (discount / 100);
     const taxableAmount = subtotal - discountAmount;
-    const taxAmount = settings.tax_enabled ? taxableAmount * TAX_RATE : 0;
+    const taxAmount = settings.tax_enabled ? taxableAmount * (settings.tax_percent / 100) : 0;
     const total = taxableAmount + taxAmount;
     
     return { subtotal, discountAmount, taxAmount, total, discount };
@@ -191,11 +255,37 @@ const BillingPOS = () => {
 
     const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
     
-    if (paymentMethod === 'Cash') {
-      const received = parseFloat(cashReceived) || 0;
-      if (received < total) {
-        showNotification('Insufficient cash received', 'error');
+    let finalBalanceAmount = 0;
+    let finalCashReceived = 0;
+    let finalChangeGiven = 0;
+
+    if (paymentMode === 'full') {
+      if (paymentMethod === 'Cash') {
+        const received = parseFloat(cashReceived) || 0;
+        if (received < total) {
+          showNotification('Insufficient cash received', 'error');
+          return;
+        }
+        finalCashReceived = received;
+        finalChangeGiven = received - total;
+      }
+    } else if (paymentMode === 'balance') {
+      const balance = parseFloat(balanceAmount) || 0;
+      if (balance > total) {
+        showNotification('Balance cannot exceed total', 'error');
         return;
+      }
+      finalBalanceAmount = balance;
+      
+      if (paymentMethod === 'Cash') {
+        const amountToPay = total - balance;
+        const received = parseFloat(cashReceived) || 0;
+        if (received < amountToPay) {
+          showNotification('Insufficient cash received', 'error');
+          return;
+        }
+        finalCashReceived = received;
+        finalChangeGiven = received - amountToPay;
       }
     }
 
@@ -207,10 +297,12 @@ const BillingPOS = () => {
         discount_percent: discount,
         discount_amount: discountAmount,
         tax_amount: taxAmount,
+        tax_percent: settings.tax_percent,
         total,
         payment_method: paymentMethod,
-        cash_received: paymentMethod === 'Cash' ? parseFloat(cashReceived) || 0 : 0,
-        change_given: paymentMethod === 'Cash' ? Math.max(0, (parseFloat(cashReceived) || 0) - total) : 0,
+        cash_received: finalCashReceived,
+        change_given: finalChangeGiven,
+        balance_amount: finalBalanceAmount,
         customer_name: customerName,
         customer_phone: customerPhone
       };
@@ -223,6 +315,8 @@ const BillingPOS = () => {
       setDiscountPercent(0);
       setCustomDiscount('');
       setCashReceived('');
+      setBalanceAmount('');
+      setPaymentMode('full');
       setCustomerName('');
       setCustomerPhone('');
       
@@ -333,6 +427,66 @@ const BillingPOS = () => {
     }
   };
 
+  const sendWhatsAppReminder = (customer) => {
+    const message = encodeURIComponent(
+      `Hello ${customer.name},\n\nThis is a reminder about your pending balance of ${formatCurrency(customer.balance)} at ${settings.shop_name}.\n\nPlease clear the balance at your earliest convenience.\n\nThank you!`
+    );
+    window.open(`https://wa.me/${customer.phone}?text=${message}`, '_blank');
+  };
+
+  const exportToExcel = (data, filename) => {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `${filename}.xlsx`);
+  };
+
+  const exportBills = () => {
+    const data = bills.map(b => ({
+      'Invoice No': b.invoice_no,
+      'Date': new Date(b.created_at).toLocaleString(),
+      'Customer': b.customer_name || 'Guest',
+      'Phone': b.customer_phone,
+      'Items': b.items.length,
+      'Subtotal': b.subtotal,
+      'Discount': b.discount_amount,
+      'Tax': b.tax_amount,
+      'Total': b.total,
+      'Payment': b.payment_method,
+      'Balance': b.balance_amount
+    }));
+    exportToExcel(data, 'bills');
+    showNotification('Bills exported to Excel', 'success');
+  };
+
+  const exportCustomers = () => {
+    const data = customers.map(c => ({
+      'Name': c.name,
+      'Phone': c.phone,
+      'Total Purchases': c.total_purchases,
+      'Visits': c.visit_count,
+      'Avg Bill': (c.total_purchases / c.visit_count).toFixed(2),
+      'Balance': c.balance || 0,
+      'Since': new Date(c.created_at).toLocaleDateString()
+    }));
+    exportToExcel(data, 'customers');
+    showNotification('Customers exported to Excel', 'success');
+  };
+
+  const exportReport = () => {
+    if (!reportData) return;
+    const data = [
+      { 'Metric': 'Total Revenue', 'Value': reportData.total_revenue },
+      { 'Metric': 'Bills Generated', 'Value': reportData.total_bills },
+      { 'Metric': 'Tax Collected', 'Value': reportData.total_tax },
+      { 'Metric': 'Discounts Given', 'Value': reportData.total_discount }
+    ];
+    exportToExcel(data, 'sales-report');
+    showNotification('Report exported to Excel', 'success');
+  };
+
   const getCategoryColor = (category) => {
     const colors = {
       Food: '#ff6b6b',
@@ -359,69 +513,74 @@ const BillingPOS = () => {
   });
 
   const lowStockProducts = products.filter(p => p.stock <= settings.low_stock_threshold && p.stock > 0);
+  const balanceCustomers = customers.filter(c => (c.balance || 0) > 0);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0a0a0f' }}>
+    <div className="pos-container">
       {/* Sidebar */}
-      <div style={{
-        width: 240,
-        background: '#141418',
-        borderRight: '1px solid #252530',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '20px 0'
-      }}>
-        <div style={{ padding: '0 20px', marginBottom: 30 }}>
-          <h1 style={{ color: '#f5a623', fontSize: 28, fontWeight: 'bold' }}>POS</h1>
-          <p style={{ color: '#666', fontSize: 12 }}>Point of Sale System</p>
+      <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <h1 className="logo">{settings.software_name || 'POS'}</h1>
+          <button className="mobile-close" onClick={() => setSidebarOpen(false)}>✕</button>
         </div>
         
-        {[
-          { id: VIEWS.POS, icon: '🛒', label: 'Point of Sale' },
-          { id: VIEWS.INVENTORY, icon: '📦', label: 'Inventory' },
-          { id: VIEWS.BILLS, icon: '🧾', label: 'Bill History' },
-          { id: VIEWS.CUSTOMERS, icon: '👥', label: 'Customers' },
-          { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
-          { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
-        ].map(item => (
-          <div
-            key={item.id}
-            data-testid={`nav-${item.id}`}
-            onClick={() => setView(item.id)}
-            style={{
-              padding: '14px 20px',
-              cursor: 'pointer',
-              background: view === item.id ? '#1a1a1f' : 'transparent',
-              borderLeft: view === item.id ? '3px solid #f5a623' : '3px solid transparent',
-              color: view === item.id ? '#f5a623' : '#e8e4d4',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              transition: 'all 0.2s',
-              fontSize: 14
-            }}
-          >
-            <span style={{ fontSize: 18 }}>{item.icon}</span>
-            {item.label}
-          </div>
-        ))}
+        <nav className="nav-menu">
+          {[
+            { id: VIEWS.POS, icon: '🛒', label: 'Point of Sale' },
+            { id: VIEWS.INVENTORY, icon: '📦', label: 'Inventory' },
+            { id: VIEWS.BILLS, icon: '🧾', label: 'Bill History' },
+            { id: VIEWS.CUSTOMERS, icon: '👥', label: 'Customers' },
+            { id: VIEWS.BALANCE, icon: '💰', label: 'Balance' },
+            { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
+            { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
+          ].map(item => (
+            <div
+              key={item.id}
+              data-testid={`nav-${item.id}`}
+              onClick={() => { setView(item.id); setSidebarOpen(false); }}
+              className={`nav-item ${view === item.id ? 'active' : ''}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+            </div>
+          ))}
+        </nav>
 
         {lowStockProducts.length > 0 && (
-          <div style={{ margin: '20px', marginTop: 'auto', padding: 12, background: '#1a1a1f', borderRadius: 6, border: '1px solid #ff9800' }}>
-            <div style={{ color: '#ff9800', fontSize: 12, fontWeight: 'bold', marginBottom: 8 }}>⚠️ LOW STOCK ALERT</div>
-            <div style={{ fontSize: 11, color: '#999' }}>{lowStockProducts.length} items need restocking</div>
+          <div className="low-stock-alert">
+            <div className="alert-header">⚠️ LOW STOCK</div>
+            <div className="alert-content">
+              {lowStockProducts.slice(0, 3).map(p => (
+                <div key={p.id} className="alert-item">
+                  {p.name}: {p.stock}
+                </div>
+              ))}
+              {lowStockProducts.length > 3 && (
+                <div className="alert-more">+{lowStockProducts.length - 3} more</div>
+              )}
+            </div>
           </div>
         )}
+
+        <div className="theme-toggle">
+          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="theme-btn">
+            {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? 'Light' : 'Dark'} Mode
+          </button>
+        </div>
       </div>
 
+      {/* Mobile Menu Button */}
+      <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>
+        ☰
+      </button>
+
       {/* Main Content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="main-content">
         {/* POS View */}
         {view === VIEWS.POS && (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            {/* Product Panel */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div className="pos-view">
+            <div className="product-panel">
+              <div className="search-bar">
                 <input
                   data-testid="barcode-input"
                   ref={barcodeRef}
@@ -430,7 +589,6 @@ const BillingPOS = () => {
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
                   onKeyDown={handleBarcodeSearch}
-                  style={{ flex: 1, minWidth: 250 }}
                 />
                 <input
                   data-testid="search-input"
@@ -438,89 +596,65 @@ const BillingPOS = () => {
                   placeholder="Search products..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ flex: 1, minWidth: 250 }}
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+              <div className="category-filters">
                 {CATEGORIES.map(cat => (
                   <button
                     key={cat}
                     data-testid={`category-${cat.toLowerCase()}`}
-                    className="btn"
+                    className={`btn category-btn ${selectedCategory === cat ? 'active' : ''}`}
                     onClick={() => setSelectedCategory(cat)}
-                    style={{
-                      background: selectedCategory === cat ? '#f5a623' : '#1a1a1f',
-                      color: selectedCategory === cat ? '#0a0a0f' : '#e8e4d4',
-                      borderColor: selectedCategory === cat ? '#f5a623' : '#333'
-                    }}
                   >
                     {cat}
                   </button>
                 ))}
               </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: 8 }}>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                  gap: 16
-                }}>
-                  {filteredProducts.map(product => {
-                    const stockStatus = getStockStatus(product.stock);
-                    return (
-                      <div
-                        key={product.id}
-                        data-testid={`product-${product.barcode}`}
-                        className="product-card"
-                        onClick={() => product.stock > 0 && addToCart(product)}
-                        style={{ opacity: product.stock === 0 ? 0.5 : 1, cursor: product.stock === 0 ? 'not-allowed' : 'pointer' }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <span className="tag" style={{ background: getCategoryColor(product.category), color: '#fff', fontSize: 10 }}>
-                            {product.category}
-                          </span>
-                          <span style={{ color: stockStatus.color, fontSize: 11, fontWeight: 'bold' }}>
-                            {stockStatus.text}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 15, fontWeight: 'bold', color: '#e8e4d4' }}>{product.name}</div>
-                        <div style={{ fontSize: 11, color: '#999' }}>Code: {product.barcode}</div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                          <span style={{ fontSize: 18, color: '#f5a623', fontWeight: 'bold' }}>{formatCurrency(product.price)}</span>
-                          <span style={{ fontSize: 12, color: '#666' }}>Stock: {product.stock}</span>
-                        </div>
+              <div className="products-grid">
+                {filteredProducts.map(product => {
+                  const stockStatus = getStockStatus(product.stock);
+                  return (
+                    <div
+                      key={product.id}
+                      data-testid={`product-${product.barcode}`}
+                      className="product-card"
+                      onClick={() => product.stock > 0 && addToCart(product)}
+                      style={{ opacity: product.stock === 0 ? 0.5 : 1 }}
+                    >
+                      <div className="product-header">
+                        <span className="tag" style={{ background: getCategoryColor(product.category) }}>
+                          {product.category}
+                        </span>
+                        <span className="stock-status" style={{ color: stockStatus.color }}>
+                          {stockStatus.text}
+                        </span>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="product-name">{product.name}</div>
+                      <div className="product-code">Code: {product.barcode}</div>
+                      <div className="product-footer">
+                        <span className="product-price">{formatCurrency(product.price)}</span>
+                        <span className="product-stock">Stock: {product.stock}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Cart Panel */}
-            <div style={{
-              width: 420,
-              background: '#141418',
-              borderLeft: '1px solid #252530',
-              display: 'flex',
-              flexDirection: 'column',
-              padding: 20,
-              overflowY: 'auto'
-            }}>
-              <div style={{ fontSize: 20, fontWeight: 'bold', color: '#f5a623', marginBottom: 16 }}>
-                Current Bill
-              </div>
+            <div className="cart-panel">
+              <div className="cart-header">Current Bill</div>
 
               {heldCarts.length > 0 && (
-                <div style={{ marginBottom: 16, padding: 12, background: '#1a1a1f', borderRadius: 6, border: '1px solid #f5a623' }}>
-                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#f5a623' }}>HELD CARTS ({heldCarts.length})</div>
+                <div className="held-carts">
+                  <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
                   {heldCarts.map(hc => (
                     <button
                       key={hc.id}
                       data-testid={`resume-cart-${hc.id}`}
-                      className="btn"
+                      className="btn held-cart-btn"
                       onClick={() => handleResumeCart(hc)}
-                      style={{ width: '100%', marginBottom: 6, textAlign: 'left', fontSize: 11 }}
                     >
                       {hc.customer_name || 'Unnamed'} - {hc.items.length} items
                     </button>
@@ -528,14 +662,13 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              <div style={{ marginBottom: 12 }}>
+              <div className="customer-inputs">
                 <input
                   data-testid="customer-name-input"
                   className="input"
                   placeholder="Customer Name"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  style={{ marginBottom: 8 }}
                 />
                 <input
                   data-testid="customer-phone-input"
@@ -546,57 +679,49 @@ const BillingPOS = () => {
                 />
               </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16, minHeight: 200 }}>
+              <div className="cart-items">
                 {cart.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: '#666', padding: 40 }}>
-                    Cart is empty
-                  </div>
+                  <div className="empty-cart">Cart is empty</div>
                 ) : (
                   cart.map(item => (
-                    <div key={item.product_id} className="cart-item" data-testid={`cart-item-${item.product_id}`} style={{ marginBottom: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ fontWeight: 'bold', fontSize: 13 }}>{item.name}</span>
+                    <div key={item.product_id} className="cart-item" data-testid={`cart-item-${item.product_id}`}>
+                      <div className="cart-item-header">
+                        <span className="cart-item-name">{item.name}</span>
                         <button
                           data-testid={`remove-item-${item.product_id}`}
-                          className="btn btn-danger"
+                          className="btn btn-danger btn-sm"
                           onClick={() => removeFromCart(item.product_id)}
-                          style={{ padding: '4px 8px', fontSize: 11 }}
                         >
                           ✕
                         </button>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="cart-item-controls">
+                        <div className="qty-controls">
                           <button
                             data-testid={`decrease-qty-${item.product_id}`}
-                            className="btn"
+                            className="btn btn-sm"
                             onClick={() => updateQuantity(item.product_id, item.quantity - 1)}
-                            style={{ padding: '4px 10px', fontSize: 14 }}
                           >
                             −
                           </button>
                           <input
                             data-testid={`qty-input-${item.product_id}`}
-                            className="input"
+                            className="input qty-input"
                             type="number"
                             value={item.quantity}
                             onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value) || 1)}
-                            style={{ width: 60, textAlign: 'center', padding: '4px' }}
                           />
                           <button
                             data-testid={`increase-qty-${item.product_id}`}
-                            className="btn"
+                            className="btn btn-sm"
                             onClick={() => updateQuantity(item.product_id, item.quantity + 1)}
-                            style={{ padding: '4px 10px', fontSize: 14 }}
                           >
                             +
                           </button>
                         </div>
-                        <span style={{ color: '#f5a623', fontWeight: 'bold' }}>
-                          {formatCurrency(item.price * item.quantity)}
-                        </span>
+                        <span className="cart-item-total">{formatCurrency(item.price * item.quantity)}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: '#666' }}>
+                      <div className="cart-item-detail">
                         {formatCurrency(item.price)} × {item.quantity}
                       </div>
                     </div>
@@ -606,21 +731,15 @@ const BillingPOS = () => {
 
               {cart.length > 0 && (
                 <>
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, marginBottom: 8, color: '#999' }}>Discount:</div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <div className="discount-section">
+                    <div className="section-label">Discount:</div>
+                    <div className="discount-options">
                       {DISCOUNT_OPTIONS.map(disc => (
                         <button
                           key={disc}
                           data-testid={`discount-${disc}`}
-                          className="btn"
+                          className={`btn btn-sm ${discountPercent === disc && !customDiscount ? 'active' : ''}`}
                           onClick={() => { setDiscountPercent(disc); setCustomDiscount(''); }}
-                          style={{
-                            padding: '6px 12px',
-                            fontSize: 12,
-                            background: discountPercent === disc && !customDiscount ? '#f5a623' : '#1a1a1f',
-                            color: discountPercent === disc && !customDiscount ? '#0a0a0f' : '#e8e4d4'
-                          }}
                         >
                           {disc}%
                         </button>
@@ -633,30 +752,29 @@ const BillingPOS = () => {
                       type="number"
                       value={customDiscount}
                       onChange={(e) => { setCustomDiscount(e.target.value); setDiscountPercent(0); }}
-                      style={{ fontSize: 12 }}
                     />
                   </div>
 
-                  <div style={{ background: '#1a1a1f', padding: 16, borderRadius: 6, marginBottom: 16 }}>
+                  <div className="bill-summary">
                     {(() => {
                       const { subtotal, discountAmount, taxAmount, total } = calculateBill();
                       return (
                         <>
-                          <div className="receipt-line">
+                          <div className="summary-line">
                             <span>Subtotal:</span>
                             <span data-testid="subtotal">{formatCurrency(subtotal)}</span>
                           </div>
-                          <div className="receipt-line">
+                          <div className="summary-line">
                             <span>Discount:</span>
-                            <span data-testid="discount" style={{ color: '#4caf50' }}>- {formatCurrency(discountAmount)}</span>
+                            <span data-testid="discount" className="discount-text">- {formatCurrency(discountAmount)}</span>
                           </div>
                           {settings.tax_enabled && (
-                            <div className="receipt-line">
-                              <span>GST (18%):</span>
+                            <div className="summary-line">
+                              <span>GST ({settings.tax_percent}%):</span>
                               <span data-testid="tax">{formatCurrency(taxAmount)}</span>
                             </div>
                           )}
-                          <div className="receipt-line" style={{ fontSize: 18, fontWeight: 'bold', color: '#f5a623', borderTop: '2px solid #f5a623', paddingTop: 12 }}>
+                          <div className="summary-line total-line">
                             <span>Total:</span>
                             <span data-testid="total">{formatCurrency(total)}</span>
                           </div>
@@ -665,21 +783,50 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, marginBottom: 8, color: '#999' }}>Payment Method:</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div className="payment-mode-section">
+                    <div className="section-label">Payment Mode:</div>
+                    <div className="payment-mode-btns">
+                      <button
+                        className={`btn ${paymentMode === 'full' ? 'btn-primary' : ''}`}
+                        onClick={() => setPaymentMode('full')}
+                      >
+                        Full Payment
+                      </button>
+                      <button
+                        className={`btn ${paymentMode === 'balance' ? 'btn-primary' : ''}`}
+                        onClick={() => setPaymentMode('balance')}
+                      >
+                        Balance
+                      </button>
+                    </div>
+                  </div>
+
+                  {paymentMode === 'balance' && (
+                    <div className="balance-section">
+                      <input
+                        className="input"
+                        placeholder="Balance Amount"
+                        type="number"
+                        value={balanceAmount}
+                        onChange={(e) => setBalanceAmount(e.target.value)}
+                      />
+                      {balanceAmount && (
+                        <div className="balance-info">
+                          Amount to Pay: {formatCurrency(calculateBill().total - parseFloat(balanceAmount || 0))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="payment-section">
+                    <div className="section-label">Payment Method:</div>
+                    <div className="payment-methods">
                       {PAYMENT_METHODS.map(method => (
                         <button
                           key={method}
                           data-testid={`payment-${method.toLowerCase()}`}
-                          className="btn"
+                          className={`btn btn-sm ${paymentMethod === method ? 'active' : ''}`}
                           onClick={() => setPaymentMethod(method)}
-                          style={{
-                            padding: '8px 12px',
-                            fontSize: 12,
-                            background: paymentMethod === method ? '#f5a623' : '#1a1a1f',
-                            color: paymentMethod === method ? '#0a0a0f' : '#e8e4d4'
-                          }}
                         >
                           {method}
                         </button>
@@ -688,7 +835,7 @@ const BillingPOS = () => {
                   </div>
 
                   {paymentMethod === 'Cash' && (
-                    <div style={{ marginBottom: 16 }}>
+                    <div className="cash-section">
                       <input
                         data-testid="cash-received-input"
                         className="input"
@@ -698,19 +845,18 @@ const BillingPOS = () => {
                         onChange={(e) => setCashReceived(e.target.value)}
                       />
                       {cashReceived && (
-                        <div style={{ marginTop: 8, fontSize: 14, color: '#4caf50' }}>
-                          Change: {formatCurrency(Math.max(0, parseFloat(cashReceived) - calculateBill().total))}
+                        <div className="change-info">
+                          Change: {formatCurrency(Math.max(0, parseFloat(cashReceived) - (paymentMode === 'balance' ? calculateBill().total - parseFloat(balanceAmount || 0) : calculateBill().total)))}
                         </div>
                       )}
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="cart-actions">
                     <button
                       data-testid="hold-cart-btn"
                       className="btn"
                       onClick={handleHoldCart}
-                      style={{ flex: 1 }}
                     >
                       Hold
                     </button>
@@ -718,7 +864,6 @@ const BillingPOS = () => {
                       data-testid="checkout-btn"
                       className="btn btn-primary"
                       onClick={handleCheckout}
-                      style={{ flex: 2 }}
                     >
                       Checkout
                     </button>
@@ -731,12 +876,14 @@ const BillingPOS = () => {
 
         {/* Inventory View */}
         {view === VIEWS.INVENTORY && (
-          <div style={{ padding: 20, overflowY: 'auto' }}>
-            <div className="section-title">Inventory Management</div>
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Inventory Management</h2>
+            </div>
             
-            <div className="card" style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, color: '#f5a623' }}>Add New Product</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <div className="card add-product-card">
+              <h3 className="card-title">Add New Product</h3>
+              <div className="form-grid">
                 <input
                   data-testid="new-product-name"
                   className="input"
@@ -797,8 +944,8 @@ const BillingPOS = () => {
               </button>
             </div>
 
-            <div className="table-wrapper">
-              <table>
+            <div className="table-container">
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -818,7 +965,7 @@ const BillingPOS = () => {
                       <tr key={product.id} data-testid={`inventory-row-${product.barcode}`}>
                         <td>{product.name}</td>
                         <td>
-                          <span className="tag" style={{ background: getCategoryColor(product.category), color: '#fff' }}>
+                          <span className="tag" style={{ background: getCategoryColor(product.category) }}>
                             {product.category}
                           </span>
                         </td>
@@ -830,20 +977,18 @@ const BillingPOS = () => {
                           {stockStatus.text}
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
+                          <div className="table-actions">
                             <button
                               data-testid={`edit-product-${product.barcode}`}
-                              className="btn"
+                              className="btn btn-sm"
                               onClick={() => setEditProduct(product)}
-                              style={{ padding: '6px 12px', fontSize: 11 }}
                             >
                               Edit
                             </button>
                             <button
                               data-testid={`delete-product-${product.barcode}`}
-                              className="btn btn-danger"
+                              className="btn btn-danger btn-sm"
                               onClick={() => handleDeleteProduct(product.id)}
-                              style={{ padding: '6px 12px', fontSize: 11 }}
                             >
                               Delete
                             </button>
@@ -860,10 +1005,37 @@ const BillingPOS = () => {
 
         {/* Bills View */}
         {view === VIEWS.BILLS && (
-          <div style={{ padding: 20, overflowY: 'auto' }}>
-            <div className="section-title">Bill History</div>
-            <div className="table-wrapper">
-              <table>
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Bill History</h2>
+              <button className="btn btn-primary" onClick={exportBills}>Export to Excel</button>
+            </div>
+            
+            <div className="filters-bar">
+              <input
+                className="input"
+                placeholder="Search by invoice, customer, or phone..."
+                value={billSearch}
+                onChange={(e) => setBillSearch(e.target.value)}
+              />
+              <input
+                className="input date-input"
+                type="date"
+                placeholder="Start Date"
+                value={billStartDate}
+                onChange={(e) => setBillStartDate(e.target.value)}
+              />
+              <input
+                className="input date-input"
+                type="date"
+                placeholder="End Date"
+                value={billEndDate}
+                onChange={(e) => setBillEndDate(e.target.value)}
+              />
+            </div>
+
+            <div className="table-container">
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Invoice No</th>
@@ -871,6 +1043,7 @@ const BillingPOS = () => {
                     <th>Customer</th>
                     <th>Items</th>
                     <th>Total</th>
+                    <th>Balance</th>
                     <th>Payment</th>
                     <th>Action</th>
                   </tr>
@@ -878,20 +1051,24 @@ const BillingPOS = () => {
                 <tbody>
                   {bills.map(bill => (
                     <tr key={bill.id} data-testid={`bill-row-${bill.invoice_no}`}>
-                      <td style={{ color: '#f5a623', fontWeight: 'bold' }}>{bill.invoice_no}</td>
+                      <td className="invoice-no">{bill.invoice_no}</td>
                       <td>{new Date(bill.created_at).toLocaleString()}</td>
-                      <td>{bill.customer_name || 'Guest'}<br/><span style={{ fontSize: 11, color: '#666' }}>{bill.customer_phone}</span></td>
-                      <td>{bill.items.length}</td>
-                      <td style={{ color: '#4caf50', fontWeight: 'bold' }}>{formatCurrency(bill.total)}</td>
                       <td>
-                        <span className="tag" style={{ background: '#1a1a1f' }}>{bill.payment_method}</span>
+                        {bill.customer_name || 'Guest'}
+                        <br/>
+                        <span className="sub-text">{bill.customer_phone}</span>
+                      </td>
+                      <td>{bill.items.length}</td>
+                      <td className="amount-text">{formatCurrency(bill.total)}</td>
+                      <td className={bill.balance_amount > 0 ? 'balance-text' : ''}>{formatCurrency(bill.balance_amount || 0)}</td>
+                      <td>
+                        <span className="tag">{bill.payment_method}</span>
                       </td>
                       <td>
                         <button
                           data-testid={`view-bill-${bill.invoice_no}`}
-                          className="btn"
+                          className="btn btn-sm"
                           onClick={() => setShowReceipt(bill)}
-                          style={{ padding: '6px 12px', fontSize: 11 }}
                         >
                           View
                         </button>
@@ -906,30 +1083,48 @@ const BillingPOS = () => {
 
         {/* Customers View */}
         {view === VIEWS.CUSTOMERS && (
-          <div style={{ padding: 20, overflowY: 'auto' }}>
-            <div className="section-title">Customer Management</div>
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Customer Management</h2>
+              <button className="btn btn-primary" onClick={exportCustomers}>Export to Excel</button>
+            </div>
             
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 24 }}>
+            <div className="filters-bar">
+              <input
+                className="input"
+                placeholder="Search by name or phone..."
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="stats-grid">
               <div className="stat-card">
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Total Customers</div>
-                <div style={{ fontSize: 32, fontWeight: 'bold', color: '#f5a623' }}>{customers.length}</div>
+                <div className="stat-label">Total Customers</div>
+                <div className="stat-value">{customers.length}</div>
               </div>
               <div className="stat-card">
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Total Revenue</div>
-                <div style={{ fontSize: 32, fontWeight: 'bold', color: '#4caf50' }}>
+                <div className="stat-label">Total Revenue</div>
+                <div className="stat-value amount-text">
                   {formatCurrency(customers.reduce((sum, c) => sum + c.total_purchases, 0))}
                 </div>
               </div>
               <div className="stat-card">
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Total Visits</div>
-                <div style={{ fontSize: 32, fontWeight: 'bold', color: '#45b7d1' }}>
+                <div className="stat-label">Total Visits</div>
+                <div className="stat-value">
                   {customers.reduce((sum, c) => sum + c.visit_count, 0)}
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Outstanding Balance</div>
+                <div className="stat-value balance-text">
+                  {formatCurrency(customers.reduce((sum, c) => sum + (c.balance || 0), 0))}
                 </div>
               </div>
             </div>
 
-            <div className="table-wrapper">
-              <table>
+            <div className="table-container">
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -937,6 +1132,7 @@ const BillingPOS = () => {
                     <th>Total Purchases</th>
                     <th>Visits</th>
                     <th>Avg Bill</th>
+                    <th>Balance</th>
                     <th>Since</th>
                   </tr>
                 </thead>
@@ -945,11 +1141,10 @@ const BillingPOS = () => {
                     <tr key={customer.id} data-testid={`customer-row-${customer.phone}`}>
                       <td>{customer.name}</td>
                       <td>{customer.phone}</td>
-                      <td style={{ color: '#4caf50', fontWeight: 'bold' }}>
-                        {formatCurrency(customer.total_purchases)}
-                      </td>
+                      <td className="amount-text">{formatCurrency(customer.total_purchases)}</td>
                       <td>{customer.visit_count}</td>
                       <td>{formatCurrency(customer.total_purchases / customer.visit_count)}</td>
+                      <td className={customer.balance > 0 ? 'balance-text' : ''}>{formatCurrency(customer.balance || 0)}</td>
                       <td>{new Date(customer.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
@@ -959,74 +1154,161 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Balance View */}
+        {view === VIEWS.BALANCE && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Customer Balance Management</h2>
+            </div>
+            
+            <div className="filters-bar">
+              <input
+                className="input"
+                placeholder="Search by name or phone..."
+                value={balanceSearch}
+                onChange={(e) => setBalanceSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-label">Customers with Balance</div>
+                <div className="stat-value">{balanceCustomers.length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Outstanding</div>
+                <div className="stat-value balance-text">
+                  {formatCurrency(balanceCustomers.reduce((sum, c) => sum + (c.balance || 0), 0))}
+                </div>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Balance Amount</th>
+                    <th>Total Purchases</th>
+                    <th>Last Visit</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {balanceCustomers
+                    .filter(c => 
+                      !balanceSearch || 
+                      c.name.toLowerCase().includes(balanceSearch.toLowerCase()) ||
+                      c.phone.includes(balanceSearch)
+                    )
+                    .map(customer => (
+                      <tr key={customer.id}>
+                        <td>{customer.name}</td>
+                        <td>{customer.phone}</td>
+                        <td className="balance-text">{formatCurrency(customer.balance)}</td>
+                        <td className="amount-text">{formatCurrency(customer.total_purchases)}</td>
+                        <td>{new Date(customer.created_at).toLocaleDateString()}</td>
+                        <td>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => sendWhatsAppReminder(customer)}
+                          >
+                            📱 WhatsApp Reminder
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Reports View */}
         {view === VIEWS.REPORTS && (
-          <div style={{ padding: 20, overflowY: 'auto' }}>
-            <div className="section-title">Sales Reports</div>
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Sales Reports</h2>
+              <button className="btn btn-primary" onClick={exportReport}>Export to Excel</button>
+            </div>
             
-            <div style={{ marginBottom: 24, display: 'flex', gap: 8 }}>
-              {['today', 'week', 'month', 'all'].map(period => (
-                <button
-                  key={period}
-                  data-testid={`report-${period}`}
-                  className="btn"
-                  onClick={() => setReportPeriod(period)}
-                  style={{
-                    background: reportPeriod === period ? '#f5a623' : '#1a1a1f',
-                    color: reportPeriod === period ? '#0a0a0f' : '#e8e4d4'
-                  }}
-                >
-                  {period === 'today' ? 'Today' : period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time'}
-                </button>
-              ))}
+            <div className="filters-bar">
+              <div className="period-filters">
+                {['today', 'week', 'month', 'all'].map(period => (
+                  <button
+                    key={period}
+                    data-testid={`report-${period}`}
+                    className={`btn ${reportPeriod === period && !reportStartDate ? 'active' : ''}`}
+                    onClick={() => { setReportPeriod(period); setReportStartDate(''); setReportEndDate(''); }}
+                  >
+                    {period === 'today' ? 'Today' : period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time'}
+                  </button>
+                ))}
+              </div>
+              <div className="date-range">
+                <input
+                  className="input date-input"
+                  type="date"
+                  value={reportStartDate}
+                  onChange={(e) => setReportStartDate(e.target.value)}
+                />
+                <span>to</span>
+                <input
+                  className="input date-input"
+                  type="date"
+                  value={reportEndDate}
+                  onChange={(e) => setReportEndDate(e.target.value)}
+                />
+              </div>
             </div>
 
             {reportData && (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+                <div className="stats-grid">
                   <div className="stat-card">
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Total Revenue</div>
-                    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#4caf50' }} data-testid="report-revenue">
+                    <div className="stat-label">Total Revenue</div>
+                    <div className="stat-value amount-text" data-testid="report-revenue">
                       {formatCurrency(reportData.total_revenue)}
                     </div>
                   </div>
                   <div className="stat-card">
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Bills Generated</div>
-                    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#45b7d1' }} data-testid="report-bills">
+                    <div className="stat-label">Bills Generated</div>
+                    <div className="stat-value" data-testid="report-bills">
                       {reportData.total_bills}
                     </div>
                   </div>
                   <div className="stat-card">
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Tax Collected</div>
-                    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#ff9800' }} data-testid="report-tax">
+                    <div className="stat-label">Tax Collected</div>
+                    <div className="stat-value" data-testid="report-tax">
                       {formatCurrency(reportData.total_tax)}
                     </div>
                   </div>
                   <div className="stat-card">
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>Discounts Given</div>
-                    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#f093fb' }} data-testid="report-discount">
+                    <div className="stat-label">Discounts Given</div>
+                    <div className="stat-value" data-testid="report-discount">
                       {formatCurrency(reportData.total_discount)}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+                <div className="report-cards">
                   <div className="card">
-                    <div style={{ fontSize: 16, fontWeight: 'bold', color: '#f5a623', marginBottom: 16 }}>Top 5 Selling Products</div>
+                    <h3 className="card-title">Top 5 Selling Products</h3>
                     {reportData.top_products.map((product, idx) => (
-                      <div key={idx} style={{ padding: '10px 0', borderBottom: '1px solid #252530', display: 'flex', justifyContent: 'space-between' }}>
+                      <div key={idx} className="report-item">
                         <span>{product.name}</span>
-                        <span style={{ color: '#f5a623', fontWeight: 'bold' }}>{product.quantity} sold</span>
+                        <span className="report-value">{product.quantity} sold</span>
                       </div>
                     ))}
                   </div>
 
                   <div className="card">
-                    <div style={{ fontSize: 16, fontWeight: 'bold', color: '#f5a623', marginBottom: 16 }}>Payment Method Breakdown</div>
+                    <h3 className="card-title">Payment Method Breakdown</h3>
                     {Object.entries(reportData.payment_breakdown).map(([method, amount]) => (
-                      <div key={method} style={{ padding: '10px 0', borderBottom: '1px solid #252530', display: 'flex', justifyContent: 'space-between' }}>
+                      <div key={method} className="report-item">
                         <span>{method}</span>
-                        <span style={{ color: '#4caf50', fontWeight: 'bold' }}>{formatCurrency(amount)}</span>
+                        <span className="report-value amount-text">{formatCurrency(amount)}</span>
                       </div>
                     ))}
                   </div>
@@ -1038,118 +1320,135 @@ const BillingPOS = () => {
 
         {/* Settings View */}
         {view === VIEWS.SETTINGS && (
-          <div style={{ padding: 20, overflowY: 'auto' }}>
-            <div className="section-title">Settings</div>
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Settings</h2>
+            </div>
             
-            <div className="card" style={{ maxWidth: 600, marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, color: '#f5a623' }}>Shop Information</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Shop Name</label>
-                  <input
-                    data-testid="settings-shop-name"
-                    className="input"
-                    placeholder="Shop Name"
-                    value={settings.shop_name}
-                    onChange={(e) => setSettings({ ...settings, shop_name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>GSTIN</label>
-                  <input
-                    data-testid="settings-gstin"
-                    className="input"
-                    placeholder="GSTIN"
-                    value={settings.gstin}
-                    onChange={(e) => setSettings({ ...settings, gstin: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Address</label>
-                  <input
-                    data-testid="settings-address"
-                    className="input"
-                    placeholder="Address"
-                    value={settings.address}
-                    onChange={(e) => setSettings({ ...settings, address: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Phone</label>
-                  <input
-                    data-testid="settings-phone"
-                    className="input"
-                    placeholder="Phone"
-                    value={settings.phone}
-                    onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 6 }}>Email</label>
-                  <input
-                    data-testid="settings-email"
-                    className="input"
-                    placeholder="Email"
-                    type="email"
-                    value={settings.email}
-                    onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="card" style={{ maxWidth: 600 }}>
-              <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, color: '#f5a623' }}>POS Options</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Enable GST (18%)</span>
-                  <button
-                    data-testid="settings-tax-toggle"
-                    className="btn"
-                    onClick={() => setSettings({ ...settings, tax_enabled: !settings.tax_enabled })}
-                    style={{
-                      background: settings.tax_enabled ? '#4caf50' : '#d32f2f',
-                      color: '#fff'
-                    }}
-                  >
-                    {settings.tax_enabled ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Auto Print Receipt</span>
-                  <button
-                    data-testid="settings-autoprint-toggle"
-                    className="btn"
-                    onClick={() => setSettings({ ...settings, auto_print: !settings.auto_print })}
-                    style={{
-                      background: settings.auto_print ? '#4caf50' : '#d32f2f',
-                      color: '#fff'
-                    }}
-                  >
-                    {settings.auto_print ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-                <div>
-                  <div style={{ marginBottom: 8 }}>Low Stock Alert Threshold</div>
-                  <input
-                    data-testid="settings-low-stock"
-                    className="input"
-                    type="number"
-                    value={settings.low_stock_threshold}
-                    onChange={(e) => setSettings({ ...settings, low_stock_threshold: parseInt(e.target.value) || 10 })}
-                  />
+            <div className="settings-container">
+              <div className="card">
+                <h3 className="card-title">Shop Information</h3>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Software Name</label>
+                    <input
+                      data-testid="settings-software-name"
+                      className="input"
+                      placeholder="Software Name"
+                      value={settings.software_name}
+                      onChange={(e) => setSettings({ ...settings, software_name: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Shop Name</label>
+                    <input
+                      data-testid="settings-shop-name"
+                      className="input"
+                      placeholder="Shop Name"
+                      value={settings.shop_name}
+                      onChange={(e) => setSettings({ ...settings, shop_name: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>GSTIN</label>
+                    <input
+                      data-testid="settings-gstin"
+                      className="input"
+                      placeholder="GSTIN"
+                      value={settings.gstin}
+                      onChange={(e) => setSettings({ ...settings, gstin: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Address</label>
+                    <input
+                      data-testid="settings-address"
+                      className="input"
+                      placeholder="Address"
+                      value={settings.address}
+                      onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Phone</label>
+                    <input
+                      data-testid="settings-phone"
+                      className="input"
+                      placeholder="Phone"
+                      value={settings.phone}
+                      onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input
+                      data-testid="settings-email"
+                      className="input"
+                      placeholder="Email"
+                      type="email"
+                      value={settings.email}
+                      onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <button
-              data-testid="save-settings-btn"
-              className="btn btn-primary"
-              onClick={handleUpdateSettings}
-              style={{ marginTop: 20 }}
-            >
-              Save Settings
-            </button>
+              <div className="card">
+                <h3 className="card-title">POS Options</h3>
+                <div className="settings-options">
+                  <div className="setting-item">
+                    <span>Enable GST</span>
+                    <button
+                      data-testid="settings-tax-toggle"
+                      className={`btn ${settings.tax_enabled ? 'btn-success' : 'btn-danger'}`}
+                      onClick={() => setSettings({ ...settings, tax_enabled: !settings.tax_enabled })}
+                    >
+                      {settings.tax_enabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {settings.tax_enabled && (
+                    <div className="form-group">
+                      <label>GST Percentage (%)</label>
+                      <input
+                        data-testid="settings-tax-percent"
+                        className="input"
+                        type="number"
+                        value={settings.tax_percent}
+                        onChange={(e) => setSettings({ ...settings, tax_percent: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  )}
+                  <div className="setting-item">
+                    <span>Auto Print Receipt</span>
+                    <button
+                      data-testid="settings-autoprint-toggle"
+                      className={`btn ${settings.auto_print ? 'btn-success' : 'btn-danger'}`}
+                      onClick={() => setSettings({ ...settings, auto_print: !settings.auto_print })}
+                    >
+                      {settings.auto_print ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="form-group">
+                    <label>Low Stock Alert Threshold</label>
+                    <input
+                      data-testid="settings-low-stock"
+                      className="input"
+                      type="number"
+                      value={settings.low_stock_threshold}
+                      onChange={(e) => setSettings({ ...settings, low_stock_threshold: parseInt(e.target.value) || 10 })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                data-testid="save-settings-btn"
+                className="btn btn-primary"
+                onClick={handleUpdateSettings}
+              >
+                Save Settings
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1158,103 +1457,105 @@ const BillingPOS = () => {
       {showReceipt && (
         <div className="modal-overlay" onClick={() => setShowReceipt(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
-            <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <h2 style={{ color: '#f5a623', fontSize: 24, marginBottom: 8 }}>{settings.shop_name}</h2>
-              {settings.gstin && <div style={{ fontSize: 12, color: '#999' }}>GSTIN: {settings.gstin}</div>}
-              {settings.address && <div style={{ fontSize: 12, color: '#999' }}>{settings.address}</div>}
-              {settings.phone && <div style={{ fontSize: 12, color: '#999' }}>Phone: {settings.phone}</div>}
-              {settings.email && <div style={{ fontSize: 12, color: '#999' }}>Email: {settings.email}</div>}
+            <div className="receipt-header">
+              <h2>{settings.shop_name}</h2>
+              {settings.gstin && <div>GSTIN: {settings.gstin}</div>}
+              {settings.address && <div>{settings.address}</div>}
+              {settings.phone && <div>Phone: {settings.phone}</div>}
+              {settings.email && <div>Email: {settings.email}</div>}
             </div>
 
-            <div style={{ borderTop: '2px dashed #333', borderBottom: '2px dashed #333', padding: '12px 0', marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 13, color: '#f5a623', fontWeight: 'bold' }}>Invoice: {showReceipt.invoice_no}</span>
-                <span style={{ fontSize: 11, color: '#999' }}>{new Date(showReceipt.created_at).toLocaleString()}</span>
+            <div className="receipt-info">
+              <div>
+                <strong>Invoice: {showReceipt.invoice_no}</strong>
               </div>
-              {showReceipt.customer_name && (
-                <div style={{ fontSize: 12 }}>Customer: {showReceipt.customer_name}</div>
-              )}
-              {showReceipt.customer_phone && (
-                <div style={{ fontSize: 12 }}>Phone: {showReceipt.customer_phone}</div>
-              )}
+              <div>{new Date(showReceipt.created_at).toLocaleString()}</div>
+              {showReceipt.customer_name && <div>Customer: {showReceipt.customer_name}</div>}
+              {showReceipt.customer_phone && <div>Phone: {showReceipt.customer_phone}</div>}
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <table style={{ width: '100%', fontSize: 12 }}>
+            <div className="receipt-items">
+              <table>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid #333' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 0' }}>Item</th>
-                    <th style={{ textAlign: 'center' }}>Qty</th>
-                    <th style={{ textAlign: 'right' }}>Price</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
+                  <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {showReceipt.items.map((item, idx) => (
                     <tr key={idx}>
-                      <td style={{ padding: '6px 0' }}>
+                      <td>
                         {item.name}
-                        {item.hsn_code && <div style={{ fontSize: 10, color: '#666' }}>HSN: {item.hsn_code}</div>}
+                        {item.hsn_code && <div className="sub-text">HSN: {item.hsn_code}</div>}
                       </td>
-                      <td style={{ textAlign: 'center' }}>{item.quantity}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(item.price)}</td>
-                      <td style={{ textAlign: 'right' }}>{formatCurrency(item.price * item.quantity)}</td>
+                      <td>{item.quantity}</td>
+                      <td>{formatCurrency(item.price)}</td>
+                      <td>{formatCurrency(item.price * item.quantity)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            <div style={{ borderTop: '1px solid #333', paddingTop: 12 }}>
-              <div className="receipt-line">
+            <div className="receipt-totals">
+              <div className="summary-line">
                 <span>Subtotal:</span>
                 <span>{formatCurrency(showReceipt.subtotal)}</span>
               </div>
               {showReceipt.discount_amount > 0 && (
-                <div className="receipt-line">
+                <div className="summary-line">
                   <span>Discount ({showReceipt.discount_percent}%):</span>
-                  <span style={{ color: '#4caf50' }}>- {formatCurrency(showReceipt.discount_amount)}</span>
+                  <span className="discount-text">- {formatCurrency(showReceipt.discount_amount)}</span>
                 </div>
               )}
               {showReceipt.tax_amount > 0 && (
-                <div className="receipt-line">
-                  <span>GST (18%):</span>
+                <div className="summary-line">
+                  <span>GST ({showReceipt.tax_percent}%):</span>
                   <span>{formatCurrency(showReceipt.tax_amount)}</span>
                 </div>
               )}
-              <div className="receipt-line" style={{ fontSize: 18, fontWeight: 'bold', color: '#f5a623', borderTop: '2px solid #f5a623', paddingTop: 12 }}>
+              <div className="summary-line total-line">
                 <span>Total:</span>
                 <span>{formatCurrency(showReceipt.total)}</span>
               </div>
-              <div className="receipt-line">
+              {showReceipt.balance_amount > 0 && (
+                <div className="summary-line balance-line">
+                  <span>Balance (Credit):</span>
+                  <span className="balance-text">{formatCurrency(showReceipt.balance_amount)}</span>
+                </div>
+              )}
+              <div className="summary-line">
                 <span>Payment Method:</span>
                 <span>{showReceipt.payment_method}</span>
               </div>
               {showReceipt.payment_method === 'Cash' && (
                 <>
-                  <div className="receipt-line">
+                  <div className="summary-line">
                     <span>Cash Received:</span>
                     <span>{formatCurrency(showReceipt.cash_received)}</span>
                   </div>
                   {showReceipt.change_given > 0 && (
-                    <div className="receipt-line">
+                    <div className="summary-line">
                       <span>Change Given:</span>
-                      <span style={{ color: '#4caf50' }}>{formatCurrency(showReceipt.change_given)}</span>
+                      <span>{formatCurrency(showReceipt.change_given)}</span>
                     </div>
                   )}
                 </>
               )}
             </div>
 
-            <div style={{ textAlign: 'center', marginTop: 20, paddingTop: 20, borderTop: '2px dashed #333', fontSize: 12, color: '#666' }}>
+            <div className="receipt-footer">
               Thank you for your business!
             </div>
 
-            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-              <button className="btn" onClick={() => window.print()} style={{ flex: 1 }} data-testid="print-receipt-btn">
+            <div className="modal-actions">
+              <button className="btn" onClick={() => window.print()} data-testid="print-receipt-btn">
                 Print
               </button>
-              <button className="btn btn-primary" onClick={() => setShowReceipt(null)} style={{ flex: 1 }} data-testid="close-receipt-btn">
+              <button className="btn btn-primary" onClick={() => setShowReceipt(null)} data-testid="close-receipt-btn">
                 Close
               </button>
             </div>
@@ -1265,9 +1566,9 @@ const BillingPOS = () => {
       {/* Edit Product Modal */}
       {editProduct && (
         <div className="modal-overlay" onClick={() => setEditProduct(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }} data-testid="edit-product-modal">
-            <div style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 20, color: '#f5a623' }}>Edit Product</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="edit-product-modal">
+            <h3 className="modal-title">Edit Product</h3>
+            <div className="form-grid">
               <input
                 data-testid="edit-product-name"
                 className="input"
@@ -1323,11 +1624,11 @@ const BillingPOS = () => {
                 onChange={(e) => setEditProduct({ ...editProduct, hsn_code: e.target.value })}
               />
             </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-              <button className="btn" onClick={() => setEditProduct(null)} style={{ flex: 1 }}>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setEditProduct(null)}>
                 Cancel
               </button>
-              <button data-testid="save-product-btn" className="btn btn-primary" onClick={handleUpdateProduct} style={{ flex: 1 }}>
+              <button data-testid="save-product-btn" className="btn btn-primary" onClick={handleUpdateProduct}>
                 Save
               </button>
             </div>
@@ -1338,12 +1639,8 @@ const BillingPOS = () => {
       {/* Notification */}
       {notification && (
         <div
-          className="notification"
+          className={`notification ${notification.type}`}
           data-testid="notification"
-          style={{
-            background: notification.type === 'error' ? '#d32f2f' : '#1a1a1f',
-            borderColor: notification.type === 'error' ? '#d32f2f' : '#f5a623'
-          }}
         >
           {notification.message}
         </div>
