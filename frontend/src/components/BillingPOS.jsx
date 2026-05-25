@@ -118,17 +118,22 @@ const BillingPOS = () => {
         axios.get(`${API}/settings`),
         axios.get(`${API}/carts/held`)
       ]);
-      setProducts(productsRes.data);
-      setBills(billsRes.data);
-      setCustomers(customersRes.data);
-      setSettings(settingsRes.data);
-      setHeldCarts(heldCartsRes.data);
+      setProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
+      setBills(Array.isArray(billsRes.data) ? billsRes.data : []);
+      setCustomers(Array.isArray(customersRes.data) ? customersRes.data : []);
+      setSettings(settingsRes.data && typeof settingsRes.data === 'object' ? settingsRes.data : settings);
+      setHeldCarts(Array.isArray(heldCartsRes.data) ? heldCartsRes.data : []);
     } catch (error) {
-      showNotification('Error loading data', 'error');
+      console.error('Load data error:', error);
+      showNotification('Error loading data - check backend connection', 'error');
     }
   };
 
   const seedDataIfEmpty = async () => {
+    if (!BACKEND_URL) {
+      console.error('REACT_APP_BACKEND_URL is not set');
+      return;
+    }
     try {
       await axios.post(`${API}/seed`);
       loadData();
@@ -562,15 +567,15 @@ const BillingPOS = () => {
     return { text: 'In Stock', color: '#4caf50' };
   };
 
-  const filteredProducts = products.filter(p => {
+  const filteredProducts = (Array.isArray(products) ? products : []).filter(p => {
     const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           p.barcode.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
-  const lowStockProducts = products.filter(p => p.stock <= settings.low_stock_threshold && p.stock > 0);
-  const balanceCustomers = customers.filter(c => (c.balance || 0) > 0);
+  const lowStockProducts = (Array.isArray(products) ? products : []).filter(p => p.stock <= settings.low_stock_threshold && p.stock > 0);
+  const balanceCustomers = (Array.isArray(customers) ? customers : []).filter(c => (c.balance || 0) > 0);
 
   return (
     <div className="pos-container">
