@@ -18,6 +18,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
 api_router = APIRouter(prefix="/api")
 
 class Product(BaseModel):
