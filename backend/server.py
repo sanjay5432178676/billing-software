@@ -27,29 +27,53 @@ class Product(BaseModel):
     name: str
     category: str
     price: float
+    cost_price: float = 0.0
+    wholesale_price: float = 0.0
     stock: int
     barcode: str
     unit: str = "pcs"
     hsn_code: str = ""
+    expiry_date: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ProductCreate(BaseModel):
     name: str
     category: str
     price: float
+    cost_price: float = 0.0
+    wholesale_price: float = 0.0
     stock: int
     barcode: str
     unit: str = "pcs"
     hsn_code: str = ""
+    expiry_date: Optional[str] = None
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
     price: Optional[float] = None
+    cost_price: Optional[float] = None
+    wholesale_price: Optional[float] = None
     stock: Optional[int] = None
     barcode: Optional[str] = None
     unit: Optional[str] = None
     hsn_code: Optional[str] = None
+    expiry_date: Optional[str] = None
+
+class StockAdjustment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    product_id: str
+    product_name: str
+    quantity_change: int
+    reason: str
+    new_stock: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class StockAdjustmentCreate(BaseModel):
+    product_id: str
+    quantity_change: int
+    reason: str
 
 class CartItem(BaseModel):
     product_id: str
@@ -74,6 +98,8 @@ class Customer(BaseModel):
     total_purchases: float = 0.0
     visit_count: int = 0
     balance: float = 0.0
+    loyalty_points: int = 0
+    customer_type: str = "retail"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BillItem(BaseModel):
@@ -91,16 +117,23 @@ class Bill(BaseModel):
     subtotal: float
     discount_percent: float
     discount_amount: float
+    discount_type: str = "percent"
     tax_amount: float
     tax_percent: float = 18.0
     total: float
     payment_method: str
+    payment_splits: List[Dict[str, Any]] = []
     cash_received: float = 0.0
     change_given: float = 0.0
     balance_amount: float = 0.0
     settled: bool = True
     customer_name: str = ""
     customer_phone: str = ""
+    loyalty_earned: int = 0
+    loyalty_redeemed: int = 0
+    is_return: bool = False
+    original_bill_id: Optional[str] = None
+    cashier: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BillCreate(BaseModel):
@@ -109,16 +142,49 @@ class BillCreate(BaseModel):
     subtotal: float
     discount_percent: float
     discount_amount: float
+    discount_type: str = "percent"
     tax_amount: float
     tax_percent: float = 18.0
     total: float
     payment_method: str
+    payment_splits: List[Dict[str, Any]] = []
     cash_received: float = 0.0
     change_given: float = 0.0
     balance_amount: float = 0.0
     settled: bool = True
     customer_name: str = ""
     customer_phone: str = ""
+    loyalty_earned: int = 0
+    loyalty_redeemed: int = 0
+    is_return: bool = False
+    original_bill_id: Optional[str] = None
+    cashier: str = ""
+
+class Quotation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    quote_no: str
+    items: List[BillItem]
+    subtotal: float
+    discount_amount: float = 0.0
+    tax_amount: float = 0.0
+    total: float
+    customer_name: str = ""
+    customer_phone: str = ""
+    notes: str = ""
+    status: str = "pending"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class QuotationCreate(BaseModel):
+    quote_no: str
+    items: List[BillItem]
+    subtotal: float
+    discount_amount: float = 0.0
+    tax_amount: float = 0.0
+    total: float
+    customer_name: str = ""
+    customer_phone: str = ""
+    notes: str = ""
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -133,6 +199,14 @@ class Settings(BaseModel):
     tax_percent: float = 18.0
     auto_print: bool = False
     low_stock_threshold: int = 10
+    logo_url: str = ""
+    receipt_header: str = ""
+    receipt_footer: str = "Thank you for your business!"
+    receipt_size: str = "A4"
+    loyalty_enabled: bool = False
+    loyalty_rate: float = 1.0
+    loyalty_redeem_rate: float = 0.5
+    expiry_alert_days: int = 30
 
 class SettingsUpdate(BaseModel):
     shop_name: Optional[str] = None
@@ -145,6 +219,14 @@ class SettingsUpdate(BaseModel):
     tax_percent: Optional[float] = None
     auto_print: Optional[bool] = None
     low_stock_threshold: Optional[int] = None
+    logo_url: Optional[str] = None
+    receipt_header: Optional[str] = None
+    receipt_footer: Optional[str] = None
+    receipt_size: Optional[str] = None
+    loyalty_enabled: Optional[bool] = None
+    loyalty_rate: Optional[float] = None
+    loyalty_redeem_rate: Optional[float] = None
+    expiry_alert_days: Optional[int] = None
 
 @api_router.get("/")
 async def root():
@@ -176,6 +258,21 @@ async def get_products(
         ]
     
     products = await db.products.find(query, {"_id": 0}).to_list(1000)
+    for p in products:
+        if isinstance(p.get('created_at'), str):
+            p['created_at'] = datetime.fromisoformat(p['created_at'])
+    return products
+
+@api_router.get("/products/expiring")
+async def get_expiring_products(days: int = 30):
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
+    
+    products = await db.products.find({
+        "expiry_date": {"$ne": None, "$gte": today, "$lte": cutoff}
+    }, {"_id": 0}).to_list(1000)
+    
     for p in products:
         if isinstance(p.get('created_at'), str):
             p['created_at'] = datetime.fromisoformat(p['created_at'])
@@ -268,13 +365,15 @@ async def create_bill(bill: BillCreate):
     
     if bill.customer_phone:
         customer = await db.customers.find_one({"phone": bill.customer_phone}, {"_id": 0})
+        loyalty_delta = bill.loyalty_earned - bill.loyalty_redeemed
         if customer:
             new_balance = customer.get('balance', 0.0) + bill.balance_amount
+            new_points = customer.get('loyalty_points', 0) + loyalty_delta
             await db.customers.update_one(
                 {"phone": bill.customer_phone},
                 {
                     "$inc": {"total_purchases": bill.total, "visit_count": 1},
-                    "$set": {"name": bill.customer_name, "balance": new_balance}
+                    "$set": {"name": bill.customer_name, "balance": new_balance, "loyalty_points": max(0, new_points)}
                 }
             )
         else:
@@ -283,7 +382,8 @@ async def create_bill(bill: BillCreate):
                 phone=bill.customer_phone,
                 total_purchases=bill.total,
                 visit_count=1,
-                balance=bill.balance_amount
+                balance=bill.balance_amount,
+                loyalty_points=max(0, loyalty_delta)
             )
             customer_doc = new_customer.model_dump()
             customer_doc['created_at'] = customer_doc['created_at'].isoformat()
@@ -505,6 +605,197 @@ async def get_settings():
         return default_settings
     return settings
 
+@api_router.post("/stock-adjustments", response_model=StockAdjustment)
+async def create_stock_adjustment(adj: StockAdjustmentCreate):
+    product = await db.products.find_one({"id": adj.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    new_stock = product['stock'] + adj.quantity_change
+    if new_stock < 0:
+        raise HTTPException(status_code=400, detail="Adjustment would result in negative stock")
+    
+    await db.products.update_one(
+        {"id": adj.product_id},
+        {"$set": {"stock": new_stock}}
+    )
+    
+    adjustment = StockAdjustment(
+        product_id=adj.product_id,
+        product_name=product['name'],
+        quantity_change=adj.quantity_change,
+        reason=adj.reason,
+        new_stock=new_stock
+    )
+    doc = adjustment.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.stock_adjustments.insert_one(doc)
+    return adjustment
+
+@api_router.get("/stock-adjustments", response_model=List[StockAdjustment])
+async def get_stock_adjustments():
+    adjustments = await db.stock_adjustments.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for a in adjustments:
+        if isinstance(a.get('created_at'), str):
+            a['created_at'] = datetime.fromisoformat(a['created_at'])
+    return adjustments
+
+@api_router.post("/quotations", response_model=Quotation)
+async def create_quotation(quote: QuotationCreate):
+    quotation = Quotation(**quote.model_dump())
+    doc = quotation.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.quotations.insert_one(doc)
+    return quotation
+
+@api_router.get("/quotations", response_model=List[Quotation])
+async def get_quotations():
+    quotations = await db.quotations.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for q in quotations:
+        if isinstance(q.get('created_at'), str):
+            q['created_at'] = datetime.fromisoformat(q['created_at'])
+    return quotations
+
+@api_router.delete("/quotations/{quote_id}")
+async def delete_quotation(quote_id: str):
+    result = await db.quotations.delete_one({"id": quote_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    return {"message": "Quotation deleted"}
+
+@api_router.post("/bills/{bill_id}/return")
+async def return_bill(bill_id: str):
+    original = await db.bills.find_one({"id": bill_id}, {"_id": 0})
+    if not original:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    
+    if original.get('is_return'):
+        raise HTTPException(status_code=400, detail="Cannot return a return bill")
+    
+    # Check if already returned
+    existing_return = await db.bills.find_one({"original_bill_id": bill_id}, {"_id": 0})
+    if existing_return:
+        raise HTTPException(status_code=400, detail="Bill already returned")
+    
+    # Create return bill with negative values
+    return_bill_data = {
+        "id": str(uuid.uuid4()),
+        "invoice_no": f"RET-{original['invoice_no']}",
+        "items": original['items'],
+        "subtotal": -original['subtotal'],
+        "discount_percent": original.get('discount_percent', 0),
+        "discount_amount": -original.get('discount_amount', 0),
+        "discount_type": original.get('discount_type', 'percent'),
+        "tax_amount": -original.get('tax_amount', 0),
+        "tax_percent": original.get('tax_percent', 18.0),
+        "total": -original['total'],
+        "payment_method": original['payment_method'],
+        "payment_splits": [],
+        "cash_received": 0,
+        "change_given": 0,
+        "balance_amount": 0,
+        "settled": True,
+        "customer_name": original.get('customer_name', ''),
+        "customer_phone": original.get('customer_phone', ''),
+        "loyalty_earned": 0,
+        "loyalty_redeemed": 0,
+        "is_return": True,
+        "original_bill_id": bill_id,
+        "cashier": original.get('cashier', ''),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.bills.insert_one(return_bill_data)
+    
+    # Restore stock
+    for item in original['items']:
+        await db.products.update_one(
+            {"id": item['product_id']},
+            {"$inc": {"stock": item['quantity']}}
+        )
+    
+    # Update customer stats
+    if original.get('customer_phone'):
+        await db.customers.update_one(
+            {"phone": original['customer_phone']},
+            {"$inc": {"total_purchases": -original['total']}}
+        )
+    
+    # Strip mongo's injected _id and parse created_at before returning
+    return_bill_data.pop('_id', None)
+    return_bill_data['created_at'] = datetime.fromisoformat(return_bill_data['created_at'])
+    return return_bill_data
+
+@api_router.get("/reports/day-close")
+async def day_close_report(date: Optional[str] = None):
+    from datetime import timedelta
+    if date:
+        start = datetime.fromisoformat(date).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    else:
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    
+    bills = await db.bills.find({
+        "created_at": {"$gte": start.isoformat(), "$lt": end.isoformat()}
+    }, {"_id": 0}).to_list(10000)
+    
+    sales_bills = [b for b in bills if not b.get('is_return')]
+    return_bills = [b for b in bills if b.get('is_return')]
+    
+    total_sales = sum(b['total'] for b in sales_bills)
+    total_returns = sum(abs(b['total']) for b in return_bills)
+    net_revenue = total_sales - total_returns
+    
+    payment_breakdown = {}
+    for bill in sales_bills:
+        if bill.get('payment_splits'):
+            for split in bill['payment_splits']:
+                method = split.get('method', 'Unknown')
+                payment_breakdown[method] = payment_breakdown.get(method, 0) + split.get('amount', 0)
+        else:
+            method = bill['payment_method']
+            payment_breakdown[method] = payment_breakdown.get(method, 0) + bill['total']
+    
+    return {
+        "date": start.isoformat(),
+        "total_sales": total_sales,
+        "total_returns": total_returns,
+        "net_revenue": net_revenue,
+        "bill_count": len(sales_bills),
+        "return_count": len(return_bills),
+        "payment_breakdown": payment_breakdown,
+        "total_tax": sum(b.get('tax_amount', 0) for b in sales_bills),
+        "total_discount": sum(b.get('discount_amount', 0) for b in sales_bills)
+    }
+
+@api_router.get("/reports/profit-loss")
+async def profit_loss_report(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    query = {"is_return": {"$ne": True}}
+    if start_date:
+        query['created_at'] = {"$gte": start_date}
+    if end_date:
+        if 'created_at' not in query:
+            query['created_at'] = {}
+        query['created_at']['$lte'] = end_date
+    
+    bills = await db.bills.find(query, {"_id": 0}).to_list(10000)
+    products = await db.products.find({}, {"_id": 0}).to_list(10000)
+    product_cost_map = {p['id']: p.get('cost_price', 0) for p in products}
+    
+    total_revenue = sum(b['total'] for b in bills)
+    total_cost = 0
+    for bill in bills:
+        for item in bill['items']:
+            cost = product_cost_map.get(item['product_id'], 0)
+            total_cost += cost * item['quantity']
+    
+    return {
+        "total_revenue": total_revenue,
+        "total_cost": total_cost,
+        "gross_profit": total_revenue - total_cost,
+        "profit_margin": ((total_revenue - total_cost) / total_revenue * 100) if total_revenue > 0 else 0
+    }
+
 @api_router.put("/settings", response_model=Settings)
 async def update_settings(update: SettingsUpdate):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
@@ -563,10 +854,15 @@ async def seed_data():
 
 app.include_router(api_router)
 
+cors_origins_env = os.environ.get('CORS_ORIGINS', '*')
+cors_origins = [o.strip() for o in cors_origins_env.split(',')]
+# When using credentials, wildcard "*" is invalid per CORS spec
+allow_credentials = cors_origins != ['*']
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=allow_credentials,
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
