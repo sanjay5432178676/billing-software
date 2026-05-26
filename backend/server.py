@@ -146,6 +146,65 @@ class SettingsUpdate(BaseModel):
     auto_print: Optional[bool] = None
     low_stock_threshold: Optional[int] = None
 
+# ── Stock Adjustment Models ───────────────────────────────────────────────────
+class StockAdjustment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    product_id: str
+    product_name: str
+    adjustment_type: str  # "add" | "remove" | "set"
+    quantity: int
+    previous_stock: int
+    new_stock: int
+    reason: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class StockAdjustmentCreate(BaseModel):
+    product_id: str
+    adjustment_type: str  # "add" | "remove" | "set"
+    quantity: int
+    reason: str = ""
+
+# ── Quotation Models ──────────────────────────────────────────────────────────
+class QuotationItem(BaseModel):
+    product_id: str
+    name: str
+    price: float
+    quantity: int
+    hsn_code: str = ""
+
+class Quotation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    quotation_no: str
+    items: List[QuotationItem]
+    subtotal: float
+    discount_percent: float = 0.0
+    discount_amount: float = 0.0
+    tax_amount: float = 0.0
+    tax_percent: float = 18.0
+    total: float
+    customer_name: str = ""
+    customer_phone: str = ""
+    valid_until: Optional[str] = None
+    status: str = "pending"  # "pending" | "converted" | "expired"
+    notes: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class QuotationCreate(BaseModel):
+    quotation_no: str
+    items: List[QuotationItem]
+    subtotal: float
+    discount_percent: float = 0.0
+    discount_amount: float = 0.0
+    tax_amount: float = 0.0
+    tax_percent: float = 18.0
+    total: float
+    customer_name: str = ""
+    customer_phone: str = ""
+    valid_until: Optional[str] = None
+    notes: str = ""
+
 @api_router.get("/")
 async def root():
     return {"message": "POS API"}
@@ -560,6 +619,181 @@ async def seed_data():
         await db.products.insert_one(doc)
     
     return {"message": f"Seeded {len(initial_products)} products"}
+
+# ── Stock Adjustment Routes ───────────────────────────────────────────────────
+@api_router.get("/stock-adjustments", response_model=List[StockAdjustment])
+async def get_stock_adjustments(
+    product_id: Optional[str] = None,
+    limit: int = 100
+):
+    query = {}
+    if product_id:
+        query['product_id'] = product_id
+    adjustments = await db.stock_adjustments.find(query, {"_id": 0}) \
+        .sort("created_at", -1).to_list(limit)
+    for a in adjustments:
+        if isinstance(a.get('created_at'), str):
+            a['created_at'] = datetime.fromisoformat(a['created_at'])
+    return adjustments
+
+@api_router.post("/stock-adjustments", response_model=StockAdjustment)
+async def create_stock_adjustment(data: StockAdjustmentCreate):
+    product = await db.products.find_one({"id": data.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    previous_stock = product.get('stock', 0)
+    if data.adjustment_type == "add":
+        new_stock = previous_stock + data.quantity
+    elif data.adjustment_type == "remove":
+        new_stock = max(0, previous_stock - data.quantity)
+    elif data.adjustment_type == "set":
+        new_stock = data.quantity
+    else:
+        raise HTTPException(status_code=400, detail="adjustment_type must be 'add', 'remove', or 'set'")
+
+    await db.products.update_one({"id": data.product_id}, {"$set": {"stock": new_stock}})
+
+    adj = StockAdjustment(
+        product_id=data.product_id,
+        product_name=product['name'],
+        adjustment_type=data.adjustment_type,
+        quantity=data.quantity,
+        previous_stock=previous_stock,
+        new_stock=new_stock,
+        reason=data.reason
+    )
+    doc = adj.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.stock_adjustments.insert_one(doc)
+    return adj
+
+@api_router.delete("/stock-adjustments/{adjustment_id}")
+async def delete_stock_adjustment(adjustment_id: str):
+    result = await db.stock_adjustments.delete_one({"id": adjustment_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    return {"message": "Adjustment deleted"}
+
+# ── Quotation Routes ──────────────────────────────────────────────────────────
+@api_router.get("/quotations", response_model=List[Quotation])
+async def get_quotations(
+    status: Optional[str] = None,
+    search: Optional[str] = None
+):
+    query = {}
+    if status:
+        query['status'] = status
+    if search:
+        query['$or'] = [
+            {'customer_name': {'$regex': search, '$options': 'i'}},
+            {'customer_phone': {'$regex': search, '$options': 'i'}},
+            {'quotation_no': {'$regex': search, '$options': 'i'}}
+        ]
+    quotations = await db.quotations.find(query, {"_id": 0}) \
+        .sort("created_at", -1).to_list(1000)
+    for q in quotations:
+        if isinstance(q.get('created_at'), str):
+            q['created_at'] = datetime.fromisoformat(q['created_at'])
+    return quotations
+
+@api_router.post("/quotations", response_model=Quotation)
+async def create_quotation(data: QuotationCreate):
+    quotation = Quotation(**data.model_dump())
+    doc = quotation.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.quotations.insert_one(doc)
+    return quotation
+
+@api_router.get("/quotations/{quotation_id}", response_model=Quotation)
+async def get_quotation(quotation_id: str):
+    q = await db.quotations.find_one({"id": quotation_id}, {"_id": 0})
+    if not q:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    if isinstance(q.get('created_at'), str):
+        q['created_at'] = datetime.fromisoformat(q['created_at'])
+    return q
+
+@api_router.put("/quotations/{quotation_id}/status")
+async def update_quotation_status(quotation_id: str, status: str):
+    valid_statuses = {"pending", "converted", "expired"}
+    if status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"status must be one of {valid_statuses}")
+    result = await db.quotations.update_one(
+        {"id": quotation_id}, {"$set": {"status": status}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    return {"message": "Status updated", "status": status}
+
+@api_router.delete("/quotations/{quotation_id}")
+async def delete_quotation(quotation_id: str):
+    result = await db.quotations.delete_one({"id": quotation_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    return {"message": "Quotation deleted"}
+
+# ── Day-Close Report Route ────────────────────────────────────────────────────
+@api_router.get("/reports/day-close")
+async def get_day_close_report(date: str):
+    """
+    Returns a full day-close / Z-report for the given date (YYYY-MM-DD).
+    """
+    try:
+        day_start = datetime.fromisoformat(f"{date}T00:00:00+00:00")
+        day_end   = datetime.fromisoformat(f"{date}T23:59:59+00:00")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be in YYYY-MM-DD format")
+
+    bills = await db.bills.find(
+        {"created_at": {"$gte": day_start.isoformat(), "$lte": day_end.isoformat()}},
+        {"_id": 0}
+    ).to_list(10000)
+
+    total_bills      = len(bills)
+    total_revenue    = sum(b['total']           for b in bills)
+    total_tax        = sum(b['tax_amount']       for b in bills)
+    total_discount   = sum(b['discount_amount']  for b in bills)
+    total_cash       = sum(b['total'] for b in bills if b.get('payment_method') == 'cash')
+    total_upi        = sum(b['total'] for b in bills if b.get('payment_method') == 'upi')
+    total_card       = sum(b['total'] for b in bills if b.get('payment_method') == 'card')
+    total_credit     = sum(b['total'] for b in bills if b.get('payment_method') == 'credit')
+    total_settled    = sum(b['total'] for b in bills if b.get('settled', True))
+    total_unsettled  = sum(b['total'] for b in bills if not b.get('settled', True))
+
+    product_sales: Dict[str, Any] = {}
+    for bill in bills:
+        for item in bill['items']:
+            pid = item['product_id']
+            if pid not in product_sales:
+                product_sales[pid] = {'name': item['name'], 'quantity': 0, 'revenue': 0.0}
+            product_sales[pid]['quantity'] += item['quantity']
+            product_sales[pid]['revenue']  += item['price'] * item['quantity']
+
+    top_products = sorted(
+        [{'name': v['name'], 'quantity': v['quantity'], 'revenue': v['revenue']}
+         for v in product_sales.values()],
+        key=lambda x: x['quantity'],
+        reverse=True
+    )[:10]
+
+    return {
+        "date": date,
+        "total_bills": total_bills,
+        "total_revenue": total_revenue,
+        "total_tax": total_tax,
+        "total_discount": total_discount,
+        "payment_breakdown": {
+            "cash": total_cash,
+            "upi": total_upi,
+            "card": total_card,
+            "credit": total_credit
+        },
+        "settled_amount": total_settled,
+        "unsettled_amount": total_unsettled,
+        "top_products": top_products,
+        "bills": bills
+    }
 
 app.include_router(api_router)
 
