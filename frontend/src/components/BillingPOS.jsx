@@ -17,6 +17,7 @@ const VIEWS = {
   REPORTS: 'reports',
   BALANCE: 'balance',
   LOW_STOCK: 'low_stock',
+  DAY_CLOSE: 'day_close',
   SETTINGS: 'settings'
 };
 
@@ -71,6 +72,9 @@ const BillingPOS = () => {
   const [reportEndDate, setReportEndDate] = useState('');
   const [reportData, setReportData] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [dayCloseDate, setDayCloseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dayCloseData, setDayCloseData] = useState(null);
+  const [dayCloseLoading, setDayCloseLoading] = useState(false);
   
   const barcodeRef = useRef(null);
 
@@ -91,6 +95,12 @@ const BillingPOS = () => {
       fetchReportData();
     }
   }, [view, reportPeriod, reportStartDate, reportEndDate]);
+
+  useEffect(() => {
+    if (view === VIEWS.DAY_CLOSE) {
+      fetchDayClose();
+    }
+  }, [view, dayCloseDate]);
 
   useEffect(() => {
     if (view === VIEWS.BILLS) {
@@ -156,6 +166,41 @@ const BillingPOS = () => {
     } catch (error) {
       showNotification('Error fetching report', 'error');
     }
+  };
+
+  const fetchDayClose = async () => {
+    setDayCloseLoading(true);
+    try {
+      const res = await axios.get(`${API}/reports/day-close`, { params: { date: dayCloseDate } });
+      setDayCloseData(res.data);
+    } catch (error) {
+      showNotification('Error fetching day close report', 'error');
+      setDayCloseData(null);
+    } finally {
+      setDayCloseLoading(false);
+    }
+  };
+
+  const exportDayClose = () => {
+    if (!dayCloseData) return;
+    const rows = (dayCloseData.bills || []).map(b => ({
+      Invoice: b.invoice_no,
+      Customer: b.customer_name || '-',
+      Phone: b.customer_phone || '-',
+      Items: b.items.length,
+      Subtotal: b.subtotal,
+      Discount: b.discount_amount,
+      Tax: b.tax_amount,
+      Total: b.total,
+      Payment: b.payment_method,
+      Settled: b.settled ? 'Yes' : 'No',
+      Time: new Date(b.created_at).toLocaleTimeString()
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Day Close');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf]), `day-close-${dayCloseDate}.xlsx`);
   };
 
   const fetchBills = async () => {
@@ -595,6 +640,7 @@ const BillingPOS = () => {
             { id: VIEWS.BALANCE, icon: '💰', label: 'Balance' },
             { id: VIEWS.LOW_STOCK, icon: '⚠️', label: 'Low Stock' },
             { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
+            { id: VIEWS.DAY_CLOSE, icon: '🔒', label: 'Day Close' },
             { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
           ].map(item => (
             <div
@@ -1455,6 +1501,151 @@ const BillingPOS = () => {
                   </div>
                 </div>
               </>
+            )}
+          </div>
+        )}
+
+        {/* Day Close View */}
+        {view === VIEWS.DAY_CLOSE && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🔒 Day Close Report</h2>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <input
+                  type="date"
+                  className="input date-input"
+                  value={dayCloseDate}
+                  onChange={e => setDayCloseDate(e.target.value)}
+                />
+                <button className="btn btn-primary" onClick={fetchDayClose}>Refresh</button>
+                {dayCloseData && (
+                  <button className="btn btn-secondary" onClick={exportDayClose}>Export Excel</button>
+                )}
+              </div>
+            </div>
+
+            {dayCloseLoading && (
+              <div style={{ textAlign: 'center', padding: '40px', fontSize: '18px' }}>
+                ⏳ Loading...
+              </div>
+            )}
+
+            {!dayCloseLoading && dayCloseData && (
+              <>
+                {/* Summary Cards */}
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-label">Total Bills</div>
+                    <div className="stat-value">{dayCloseData.total_bills}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Total Revenue</div>
+                    <div className="stat-value amount-text">{formatCurrency(dayCloseData.total_revenue)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Tax Collected</div>
+                    <div className="stat-value">{formatCurrency(dayCloseData.total_tax)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Discounts Given</div>
+                    <div className="stat-value">{formatCurrency(dayCloseData.total_discount)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Settled Amount</div>
+                    <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(dayCloseData.settled_amount)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Unsettled / Credit</div>
+                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(dayCloseData.unsettled_amount)}</div>
+                  </div>
+                </div>
+
+                {/* Payment Breakdown + Top Products */}
+                <div className="report-cards">
+                  <div className="card">
+                    <h3 className="card-title">Payment Breakdown</h3>
+                    {Object.entries(dayCloseData.payment_breakdown).map(([method, amount]) => (
+                      <div key={method} className="report-item">
+                        <span style={{ textTransform: 'capitalize' }}>{method}</span>
+                        <span className="report-value amount-text">{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                    {Object.keys(dayCloseData.payment_breakdown).length === 0 && (
+                      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No transactions</div>
+                    )}
+                  </div>
+
+                  <div className="card">
+                    <h3 className="card-title">Top Products</h3>
+                    {dayCloseData.top_products.map((product, idx) => (
+                      <div key={idx} className="report-item">
+                        <span>{product.name}</span>
+                        <span className="report-value">{product.quantity} sold · {formatCurrency(product.revenue)}</span>
+                      </div>
+                    ))}
+                    {dayCloseData.top_products.length === 0 && (
+                      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No products sold</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bills Table */}
+                {dayCloseData.bills && dayCloseData.bills.length > 0 && (
+                  <div className="card" style={{ marginTop: '20px' }}>
+                    <h3 className="card-title">Bills for {dayCloseDate}</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Total</th>
+                            <th>Payment</th>
+                            <th>Status</th>
+                            <th>Time</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dayCloseData.bills.map(bill => (
+                            <tr key={bill.id}>
+                              <td><strong>{bill.invoice_no}</strong></td>
+                              <td>{bill.customer_name || '-'}</td>
+                              <td>{bill.items.length} items</td>
+                              <td className="amount-text">{formatCurrency(bill.total)}</td>
+                              <td style={{ textTransform: 'capitalize' }}>{bill.payment_method}</td>
+                              <td>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '12px',
+                                  background: bill.settled ? 'var(--success)' : 'var(--danger)',
+                                  color: 'white'
+                                }}>
+                                  {bill.settled ? 'Settled' : 'Pending'}
+                                </span>
+                              </td>
+                              <td>{new Date(bill.created_at).toLocaleTimeString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {dayCloseData.total_bills === 0 && (
+                  <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)', fontSize: '18px' }}>
+                    📭 No bills found for {dayCloseDate}
+                  </div>
+                )}
+              </>
+            )}
+
+            {!dayCloseLoading && !dayCloseData && (
+              <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)', fontSize: '18px' }}>
+                Select a date and click Refresh to load the report.
+              </div>
             )}
           </div>
         )}
