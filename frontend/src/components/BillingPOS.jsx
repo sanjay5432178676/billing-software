@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, CartesianGrid } from 'recharts';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -17,6 +18,9 @@ const VIEWS = {
   REPORTS: 'reports',
   BALANCE: 'balance',
   LOW_STOCK: 'low_stock',
+  QUOTATIONS: 'quotations',
+  STOCK_ADJUSTMENTS: 'stock_adjustments',
+  DAY_CLOSE: 'day_close',
   SETTINGS: 'settings'
 };
 
@@ -38,8 +42,29 @@ const BillingPOS = () => {
     tax_enabled: true,
     tax_percent: 18,
     auto_print: false,
-    low_stock_threshold: 10
+    low_stock_threshold: 10,
+    logo_url: '',
+    receipt_header: '',
+    receipt_footer: 'Thank you for your business!',
+    receipt_size: 'A4',
+    loyalty_enabled: false,
+    loyalty_rate: 1,
+    loyalty_redeem_rate: 0.5,
+    expiry_alert_days: 30
   });
+  
+  const [discountType, setDiscountType] = useState('percent');
+  const [splitPaymentMode, setSplitPaymentMode] = useState(false);
+  const [paymentSplits, setPaymentSplits] = useState([]);
+  const [loyaltyRedeem, setLoyaltyRedeem] = useState(0);
+  const [quotations, setQuotations] = useState([]);
+  const [stockAdjustments, setStockAdjustments] = useState([]);
+  const [showStockAdjModal, setShowStockAdjModal] = useState(null);
+  const [stockAdjQty, setStockAdjQty] = useState('');
+  const [stockAdjReason, setStockAdjReason] = useState('');
+  const [dayCloseData, setDayCloseData] = useState(null);
+  const [dayCloseDate, setDayCloseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [showBarcodeFor, setShowBarcodeFor] = useState(null);
   
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,6 +133,43 @@ const BillingPOS = () => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (view === VIEWS.QUOTATIONS) fetchQuotations();
+    if (view === VIEWS.STOCK_ADJUSTMENTS) fetchStockAdjustments();
+    if (view === VIEWS.DAY_CLOSE) fetchDayClose(dayCloseDate);
+  }, [view, dayCloseDate]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setView(VIEWS.POS);
+        setCart([]);
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        setView(VIEWS.POS);
+        setTimeout(() => barcodeRef.current?.focus(), 100);
+      } else if (e.key === 'F12') {
+        e.preventDefault();
+        if (view === VIEWS.POS && cart.length > 0) {
+          handleCheckout();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowReceipt(null);
+        setEditProduct(null);
+        setCustomerHistory(null);
+        setEditingCustomer(null);
+        setShowStockAdjModal(null);
+        setShowBarcodeFor(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, cart]);
 
   const loadData = async () => {
     try {
@@ -245,13 +307,24 @@ const BillingPOS = () => {
 
   const calculateBill = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discount = parseFloat(customDiscount) || discountPercent;
-    const discountAmount = subtotal * (discount / 100);
-    const taxableAmount = subtotal - discountAmount;
+    let discountAmount = 0;
+    let discount = 0;
+    
+    if (discountType === 'amount') {
+      discountAmount = parseFloat(customDiscount) || 0;
+      discount = subtotal > 0 ? (discountAmount / subtotal) * 100 : 0;
+    } else {
+      discount = parseFloat(customDiscount) || discountPercent;
+      discountAmount = subtotal * (discount / 100);
+    }
+    
+    const loyaltyRedeemAmount = (parseFloat(loyaltyRedeem) || 0) * settings.loyalty_redeem_rate;
+    const taxableAmount = Math.max(0, subtotal - discountAmount - loyaltyRedeemAmount);
     const taxAmount = settings.tax_enabled ? taxableAmount * (settings.tax_percent / 100) : 0;
     const total = taxableAmount + taxAmount;
+    const loyaltyEarned = settings.loyalty_enabled ? Math.floor(total / 100 * settings.loyalty_rate) : 0;
     
-    return { subtotal, discountAmount, taxAmount, total, discount };
+    return { subtotal, discountAmount, taxAmount, total, discount, loyaltyEarned, loyaltyRedeemAmount };
   };
 
   const handleCheckout = async () => {
@@ -260,24 +333,36 @@ const BillingPOS = () => {
       return;
     }
 
-    const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
+    const { subtotal, discountAmount, taxAmount, total, discount, loyaltyEarned } = calculateBill();
     const paid = parseFloat(customerPaid) || 0;
     
     let finalBalanceAmount = 0;
     let finalCashReceived = 0;
     let finalChangeGiven = 0;
+    let finalPaymentSplits = [];
 
-    if (paid >= total) {
-      finalCashReceived = paid;
-      finalChangeGiven = paid - total;
-      finalBalanceAmount = 0;
+    if (splitPaymentMode && paymentSplits.length > 0) {
+      const splitTotal = paymentSplits.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+      if (splitTotal < total) {
+        finalBalanceAmount = total - splitTotal;
+        if (!customerPhone) {
+          showNotification('Customer phone required for partial payment', 'error');
+          return;
+        }
+      }
+      finalPaymentSplits = paymentSplits.map(s => ({ method: s.method, amount: parseFloat(s.amount) || 0 }));
+      finalCashReceived = paymentSplits.filter(s => s.method === 'Cash').reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
     } else {
-      finalCashReceived = paid;
-      finalBalanceAmount = total - paid;
-      finalChangeGiven = 0;
-      if (!customerPhone) {
-        showNotification('Customer phone required for partial payment', 'error');
-        return;
+      if (paid >= total) {
+        finalCashReceived = paid;
+        finalChangeGiven = paid - total;
+      } else {
+        finalCashReceived = paid;
+        finalBalanceAmount = total - paid;
+        if (!customerPhone) {
+          showNotification('Customer phone required for partial payment', 'error');
+          return;
+        }
       }
     }
 
@@ -288,16 +373,20 @@ const BillingPOS = () => {
         subtotal,
         discount_percent: discount,
         discount_amount: discountAmount,
+        discount_type: discountType,
         tax_amount: taxAmount,
         tax_percent: settings.tax_percent,
         total,
-        payment_method: paymentMethod,
+        payment_method: splitPaymentMode ? 'Split' : paymentMethod,
+        payment_splits: finalPaymentSplits,
         cash_received: finalCashReceived,
         change_given: finalChangeGiven,
         balance_amount: finalBalanceAmount,
         settled: finalBalanceAmount <= 0,
         customer_name: customerName,
-        customer_phone: customerPhone
+        customer_phone: customerPhone,
+        loyalty_earned: loyaltyEarned,
+        loyalty_redeemed: parseInt(loyaltyRedeem) || 0
       };
 
       const res = await axios.post(`${API}/bills`, billData);
@@ -307,9 +396,13 @@ const BillingPOS = () => {
       setCart([]);
       setDiscountPercent(0);
       setCustomDiscount('');
+      setDiscountType('percent');
       setCustomerPaid('');
       setCustomerName('');
       setCustomerPhone('');
+      setSplitPaymentMode(false);
+      setPaymentSplits([]);
+      setLoyaltyRedeem(0);
       
       await loadData();
       
@@ -496,6 +589,163 @@ const BillingPOS = () => {
     showNotification('Balance exported to Excel', 'success');
   };
 
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      showNotification('Logo must be less than 500KB', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSettings({ ...settings, logo_url: reader.result });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const addPaymentSplit = () => {
+    setPaymentSplits([...paymentSplits, { method: 'Cash', amount: '' }]);
+  };
+
+  const updatePaymentSplit = (idx, field, value) => {
+    const newSplits = [...paymentSplits];
+    newSplits[idx][field] = value;
+    setPaymentSplits(newSplits);
+  };
+
+  const removePaymentSplit = (idx) => {
+    setPaymentSplits(paymentSplits.filter((_, i) => i !== idx));
+  };
+
+  const handleStockAdjustment = async () => {
+    if (!showStockAdjModal || !stockAdjQty || !stockAdjReason) {
+      showNotification('Fill all fields', 'error');
+      return;
+    }
+    try {
+      await axios.post(`${API}/stock-adjustments`, {
+        product_id: showStockAdjModal.id,
+        quantity_change: parseInt(stockAdjQty),
+        reason: stockAdjReason
+      });
+      showNotification('Stock adjusted successfully', 'success');
+      setShowStockAdjModal(null);
+      setStockAdjQty('');
+      setStockAdjReason('');
+      await loadData();
+      const res = await axios.get(`${API}/stock-adjustments`);
+      setStockAdjustments(res.data);
+    } catch (error) {
+      showNotification(error.response?.data?.detail || 'Error adjusting stock', 'error');
+    }
+  };
+
+  const handleSaveAsQuotation = async () => {
+    if (cart.length === 0) {
+      showNotification('Cart is empty', 'error');
+      return;
+    }
+    const { subtotal, discountAmount, taxAmount, total } = calculateBill();
+    try {
+      await axios.post(`${API}/quotations`, {
+        quote_no: `QT-${Date.now()}`,
+        items: cart,
+        subtotal,
+        discount_amount: discountAmount,
+        tax_amount: taxAmount,
+        total,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        notes: ''
+      });
+      showNotification('Quotation saved', 'success');
+      setCart([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      const res = await axios.get(`${API}/quotations`);
+      setQuotations(res.data);
+    } catch (error) {
+      showNotification('Error saving quotation', 'error');
+    }
+  };
+
+  const convertQuotationToBill = (quote) => {
+    setCart(quote.items);
+    setCustomerName(quote.customer_name);
+    setCustomerPhone(quote.customer_phone);
+    setView(VIEWS.POS);
+    showNotification('Quotation loaded — complete checkout', 'success');
+  };
+
+  const handleReturnBill = async (bill) => {
+    if (!window.confirm(`Process return for ${bill.invoice_no}? Stock will be restored.`)) return;
+    try {
+      await axios.post(`${API}/bills/${bill.id}/return`);
+      showNotification('Return processed successfully', 'success');
+      await loadData();
+    } catch (error) {
+      showNotification(error.response?.data?.detail || 'Error processing return', 'error');
+    }
+  };
+
+  const fetchDayClose = async (date) => {
+    try {
+      const res = await axios.get(`${API}/reports/day-close`, { params: { date } });
+      setDayCloseData(res.data);
+    } catch (error) {
+      showNotification('Error loading day close', 'error');
+    }
+  };
+
+  const fetchQuotations = async () => {
+    try {
+      const res = await axios.get(`${API}/quotations`);
+      setQuotations(res.data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const fetchStockAdjustments = async () => {
+    try {
+      const res = await axios.get(`${API}/stock-adjustments`);
+      setStockAdjustments(res.data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const downloadBarcode = (product) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 300;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw simple barcode bars from string hash
+    let x = 20;
+    ctx.fillStyle = '#000';
+    for (let i = 0; i < product.barcode.length; i++) {
+      const code = product.barcode.charCodeAt(i);
+      const barWidth = (code % 3) + 1;
+      ctx.fillRect(x, 10, barWidth, 60);
+      x += barWidth + 2;
+    }
+    
+    ctx.fillStyle = '#000';
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(product.barcode, canvas.width / 2, 90);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText(`${product.name} - ₹${product.price}`, canvas.width / 2, 110);
+    
+    canvas.toBlob(blob => {
+      saveAs(blob, `barcode-${product.barcode}.png`);
+    });
+    showNotification('Barcode downloaded', 'success');
+  };
+
   const exportToExcel = (data, filename) => {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -591,9 +841,12 @@ const BillingPOS = () => {
             { id: VIEWS.POS, icon: '🛒', label: 'Point of Sale' },
             { id: VIEWS.INVENTORY, icon: '📦', label: 'Inventory' },
             { id: VIEWS.BILLS, icon: '🧾', label: 'Bill History' },
+            { id: VIEWS.QUOTATIONS, icon: '📄', label: 'Quotations' },
             { id: VIEWS.CUSTOMERS, icon: '👥', label: 'Customers' },
             { id: VIEWS.BALANCE, icon: '💰', label: 'Balance' },
             { id: VIEWS.LOW_STOCK, icon: '⚠️', label: 'Low Stock' },
+            { id: VIEWS.STOCK_ADJUSTMENTS, icon: '🔧', label: 'Stock Adjust' },
+            { id: VIEWS.DAY_CLOSE, icon: '📅', label: 'Day Close' },
             { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
             { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
           ].map(item => (
@@ -800,22 +1053,38 @@ const BillingPOS = () => {
                 <>
                   <div className="discount-section">
                     <div className="section-label">Discount:</div>
-                    <div className="discount-options">
-                      {DISCOUNT_OPTIONS.map(disc => (
-                        <button
-                          key={disc}
-                          data-testid={`discount-${disc}`}
-                          className={`btn btn-sm ${discountPercent === disc && !customDiscount ? 'active' : ''}`}
-                          onClick={() => { setDiscountPercent(disc); setCustomDiscount(''); }}
-                        >
-                          {disc}%
-                        </button>
-                      ))}
+                    <div className="discount-options" style={{ marginBottom: 8 }}>
+                      <button
+                        className={`btn btn-sm ${discountType === 'percent' ? 'active' : ''}`}
+                        onClick={() => setDiscountType('percent')}
+                      >
+                        %
+                      </button>
+                      <button
+                        className={`btn btn-sm ${discountType === 'amount' ? 'active' : ''}`}
+                        onClick={() => setDiscountType('amount')}
+                      >
+                        ₹
+                      </button>
                     </div>
+                    {discountType === 'percent' && (
+                      <div className="discount-options">
+                        {DISCOUNT_OPTIONS.map(disc => (
+                          <button
+                            key={disc}
+                            data-testid={`discount-${disc}`}
+                            className={`btn btn-sm ${discountPercent === disc && !customDiscount ? 'active' : ''}`}
+                            onClick={() => { setDiscountPercent(disc); setCustomDiscount(''); }}
+                          >
+                            {disc}%
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <input
                       data-testid="custom-discount-input"
                       className="input"
-                      placeholder="Custom discount %"
+                      placeholder={discountType === 'percent' ? 'Custom discount %' : 'Discount amount ₹'}
                       type="number"
                       value={customDiscount}
                       onChange={(e) => { setCustomDiscount(e.target.value); setDiscountPercent(0); }}
@@ -850,57 +1119,139 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
+                  {settings.loyalty_enabled && customerPhone && (() => {
+                    const cust = customers.find(c => c.phone === customerPhone);
+                    const availablePoints = cust?.loyalty_points || 0;
+                    if (availablePoints > 0) {
+                      return (
+                        <div className="discount-section">
+                          <div className="section-label">Loyalty Points (Available: {availablePoints}):</div>
+                          <input
+                            className="input"
+                            placeholder="Points to redeem"
+                            type="number"
+                            min="0"
+                            max={availablePoints}
+                            value={loyaltyRedeem}
+                            onChange={(e) => setLoyaltyRedeem(Math.min(parseInt(e.target.value) || 0, availablePoints))}
+                          />
+                          <div className="sub-text" style={{ marginTop: 4 }}>
+                            1 point = ₹{settings.loyalty_redeem_rate}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   <div className="payment-section">
-                    <div className="section-label">Payment Method:</div>
-                    <div className="payment-methods">
-                      {PAYMENT_METHODS.map(method => (
-                        <button
-                          key={method}
-                          data-testid={`payment-${method.toLowerCase()}`}
-                          className={`btn btn-sm ${paymentMethod === method ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod(method)}
-                        >
-                          {method}
-                        </button>
-                      ))}
+                    <div className="section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Payment Method:</span>
+                      <button
+                        className={`btn btn-sm ${splitPaymentMode ? 'active' : ''}`}
+                        onClick={() => { setSplitPaymentMode(!splitPaymentMode); if (!splitPaymentMode) setPaymentSplits([{ method: 'Cash', amount: '' }]); else setPaymentSplits([]); }}
+                      >
+                        {splitPaymentMode ? '✓ Split' : 'Split Payment'}
+                      </button>
                     </div>
+                    {!splitPaymentMode && (
+                      <div className="payment-methods">
+                        {PAYMENT_METHODS.map(method => (
+                          <button
+                            key={method}
+                            data-testid={`payment-${method.toLowerCase()}`}
+                            className={`btn btn-sm ${paymentMethod === method ? 'active' : ''}`}
+                            onClick={() => setPaymentMethod(method)}
+                          >
+                            {method}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="cash-section">
-                    <div className="section-label">Customer Paid Amount:</div>
-                    <input
-                      data-testid="customer-paid-input"
-                      className="input"
-                      placeholder="Enter amount paid by customer"
-                      type="number"
-                      value={customerPaid}
-                      onChange={(e) => setCustomerPaid(e.target.value)}
-                    />
-                    {customerPaid && (() => {
-                      const { total } = calculateBill();
-                      const paid = parseFloat(customerPaid) || 0;
-                      if (paid >= total) {
-                        return <div className="change-info">Change: {formatCurrency(paid - total)}</div>;
-                      } else {
-                        return <div className="balance-info balance-text">Balance Due: {formatCurrency(total - paid)}</div>;
-                      }
-                    })()}
-                  </div>
+                  {splitPaymentMode ? (
+                    <div className="cash-section">
+                      <div className="section-label">Split Payment:</div>
+                      {paymentSplits.map((split, idx) => (
+                        <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                          <select
+                            className="input"
+                            style={{ flex: 1 }}
+                            value={split.method}
+                            onChange={(e) => updatePaymentSplit(idx, 'method', e.target.value)}
+                          >
+                            {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                          <input
+                            className="input"
+                            type="number"
+                            placeholder="Amount"
+                            style={{ flex: 1 }}
+                            value={split.amount}
+                            onChange={(e) => updatePaymentSplit(idx, 'amount', e.target.value)}
+                          />
+                          <button className="btn btn-danger btn-sm" onClick={() => removePaymentSplit(idx)}>✕</button>
+                        </div>
+                      ))}
+                      <button className="btn btn-sm" onClick={addPaymentSplit} style={{ width: '100%' }}>+ Add Split</button>
+                      {(() => {
+                        const { total } = calculateBill();
+                        const splitTotal = paymentSplits.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+                        const diff = total - splitTotal;
+                        return diff > 0 ? (
+                          <div className="balance-info balance-text">Balance Due: {formatCurrency(diff)}</div>
+                        ) : diff < 0 ? (
+                          <div className="change-info">Excess: {formatCurrency(-diff)}</div>
+                        ) : (
+                          <div className="change-info">✓ Fully Paid</div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="cash-section">
+                      <div className="section-label">Customer Paid Amount:</div>
+                      <input
+                        data-testid="customer-paid-input"
+                        className="input"
+                        placeholder="Enter amount paid by customer"
+                        type="number"
+                        value={customerPaid}
+                        onChange={(e) => setCustomerPaid(e.target.value)}
+                      />
+                      {customerPaid && (() => {
+                        const { total } = calculateBill();
+                        const paid = parseFloat(customerPaid) || 0;
+                        if (paid >= total) {
+                          return <div className="change-info">Change: {formatCurrency(paid - total)}</div>;
+                        } else {
+                          return <div className="balance-info balance-text">Balance Due: {formatCurrency(total - paid)}</div>;
+                        }
+                      })()}
+                    </div>
+                  )}
 
-                  <div className="cart-actions">
+                  <div className="cart-actions" style={{ flexWrap: 'wrap' }}>
                     <button
                       data-testid="hold-cart-btn"
-                      className="btn"
+                      className="btn btn-sm"
                       onClick={handleHoldCart}
                     >
                       Hold
                     </button>
                     <button
+                      className="btn btn-sm"
+                      onClick={handleSaveAsQuotation}
+                    >
+                      Quote
+                    </button>
+                    <button
                       data-testid="checkout-btn"
                       className="btn btn-primary"
                       onClick={handleCheckout}
+                      style={{ flex: 2 }}
                     >
-                      Checkout
+                      Checkout (F12)
                     </button>
                   </div>
                 </>
@@ -991,6 +1342,208 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Quotations View */}
+        {view === VIEWS.QUOTATIONS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Quotations / Estimates</h2>
+            </div>
+            
+            {quotations.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+                <h3 className="card-title">No Quotations Yet</h3>
+                <p>Save a cart as quotation from the POS screen using the "Quote" button.</p>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Quote No</th>
+                      <th>Date</th>
+                      <th>Customer</th>
+                      <th>Items</th>
+                      <th>Total</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quotations.map(q => (
+                      <tr key={q.id}>
+                        <td className="invoice-no">{q.quote_no}</td>
+                        <td>{new Date(q.created_at).toLocaleDateString()}</td>
+                        <td>{q.customer_name || 'Guest'}<br/><span className="sub-text">{q.customer_phone}</span></td>
+                        <td>{q.items.length}</td>
+                        <td className="amount-text">{formatCurrency(q.total)}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-sm btn-primary" onClick={() => convertQuotationToBill(q)}>
+                              → Convert to Bill
+                            </button>
+                            <button className="btn btn-sm btn-danger" onClick={async () => {
+                              if (!window.confirm('Delete this quotation?')) return;
+                              await axios.delete(`${API}/quotations/${q.id}`);
+                              fetchQuotations();
+                              showNotification('Quotation deleted', 'success');
+                            }}>
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stock Adjustments View */}
+        {view === VIEWS.STOCK_ADJUSTMENTS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Stock Adjustments Log</h2>
+              <button className="btn btn-primary" onClick={() => exportToExcel(
+                stockAdjustments.map(a => ({
+                  'Product': a.product_name,
+                  'Quantity Change': a.quantity_change,
+                  'New Stock': a.new_stock,
+                  'Reason': a.reason,
+                  'Date': new Date(a.created_at).toLocaleString()
+                })), 'stock-adjustments'
+              )}>Export to Excel</button>
+            </div>
+            
+            <div className="card" style={{ marginBottom: 20 }}>
+              <h3 className="card-title">Quick Adjust Stock</h3>
+              <div className="form-grid">
+                <select className="input" onChange={(e) => {
+                  const prod = products.find(p => p.id === e.target.value);
+                  if (prod) setShowStockAdjModal(prod);
+                }} value={showStockAdjModal?.id || ''}>
+                  <option value="">Select Product...</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {stockAdjustments.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+                <p>No stock adjustments yet.</p>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Product</th>
+                      <th>Change</th>
+                      <th>New Stock</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockAdjustments.map(a => (
+                      <tr key={a.id}>
+                        <td>{new Date(a.created_at).toLocaleString()}</td>
+                        <td><strong>{a.product_name}</strong></td>
+                        <td style={{ color: a.quantity_change > 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>
+                          {a.quantity_change > 0 ? '+' : ''}{a.quantity_change}
+                        </td>
+                        <td>{a.new_stock}</td>
+                        <td>{a.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Day Close View */}
+        {view === VIEWS.DAY_CLOSE && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">Day Close Report</h2>
+              <button className="btn btn-primary" onClick={() => {
+                if (!dayCloseData) return;
+                const data = [
+                  { Metric: 'Total Sales', Value: dayCloseData.total_sales },
+                  { Metric: 'Total Returns', Value: dayCloseData.total_returns },
+                  { Metric: 'Net Revenue', Value: dayCloseData.net_revenue },
+                  { Metric: 'Bills Generated', Value: dayCloseData.bill_count },
+                  { Metric: 'Returns', Value: dayCloseData.return_count },
+                  { Metric: 'Tax Collected', Value: dayCloseData.total_tax },
+                  { Metric: 'Discounts', Value: dayCloseData.total_discount }
+                ];
+                Object.entries(dayCloseData.payment_breakdown || {}).forEach(([method, amount]) => {
+                  data.push({ Metric: `Payment: ${method}`, Value: amount });
+                });
+                exportToExcel(data, `day-close-${dayCloseDate}`);
+              }}>Export to Excel</button>
+            </div>
+
+            <div className="filters-bar">
+              <input
+                className="input date-input"
+                type="date"
+                value={dayCloseDate}
+                onChange={(e) => setDayCloseDate(e.target.value)}
+              />
+            </div>
+
+            {dayCloseData && (
+              <>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-label">Total Sales</div>
+                    <div className="stat-value amount-text">{formatCurrency(dayCloseData.total_sales)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Total Returns</div>
+                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(dayCloseData.total_returns)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Net Revenue</div>
+                    <div className="stat-value" style={{ color: 'var(--accent)' }}>{formatCurrency(dayCloseData.net_revenue)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Bills</div>
+                    <div className="stat-value">{dayCloseData.bill_count}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Returns</div>
+                    <div className="stat-value">{dayCloseData.return_count}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Tax Collected</div>
+                    <div className="stat-value">{formatCurrency(dayCloseData.total_tax)}</div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h3 className="card-title">Payment Method Breakdown</h3>
+                  {Object.entries(dayCloseData.payment_breakdown || {}).length === 0 ? (
+                    <p>No transactions on this date.</p>
+                  ) : (
+                    Object.entries(dayCloseData.payment_breakdown).map(([method, amount]) => (
+                      <div key={method} className="report-item">
+                        <span>{method}</span>
+                        <span className="report-value amount-text">{formatCurrency(amount)}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Inventory View */}
         {view === VIEWS.INVENTORY && (
           <div className="content-view">
@@ -1021,10 +1574,17 @@ const BillingPOS = () => {
                 <input
                   data-testid="new-product-price"
                   className="input"
-                  placeholder="Price *"
+                  placeholder="Sell Price *"
                   type="number"
                   value={newProduct.price}
                   onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                />
+                <input
+                  className="input"
+                  placeholder="Cost Price"
+                  type="number"
+                  value={newProduct.cost_price || ''}
+                  onChange={(e) => setNewProduct({ ...newProduct, cost_price: e.target.value })}
                 />
                 <input
                   data-testid="new-product-stock"
@@ -1054,6 +1614,13 @@ const BillingPOS = () => {
                   placeholder="HSN Code"
                   value={newProduct.hsn_code}
                   onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
+                />
+                <input
+                  className="input"
+                  placeholder="Expiry Date"
+                  type="date"
+                  value={newProduct.expiry_date || ''}
+                  onChange={(e) => setNewProduct({ ...newProduct, expiry_date: e.target.value })}
                 />
               </div>
               <button data-testid="add-product-btn" className="btn btn-primary" onClick={handleAddProduct}>
@@ -1094,7 +1661,7 @@ const BillingPOS = () => {
                           {stockStatus.text}
                         </td>
                         <td>
-                          <div className="table-actions">
+                          <div className="table-actions" style={{ flexWrap: 'wrap' }}>
                             <button
                               data-testid={`edit-product-${product.barcode}`}
                               className="btn btn-sm"
@@ -1103,11 +1670,25 @@ const BillingPOS = () => {
                               Edit
                             </button>
                             <button
+                              className="btn btn-sm"
+                              onClick={() => setShowStockAdjModal(product)}
+                              title="Adjust Stock"
+                            >
+                              🔧
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => setShowBarcodeFor(product)}
+                              title="Show Barcode"
+                            >
+                              📑
+                            </button>
+                            <button
                               data-testid={`delete-product-${product.barcode}`}
                               className="btn btn-danger btn-sm"
                               onClick={() => handleDeleteProduct(product.id)}
                             >
-                              Delete
+                              🗑️
                             </button>
                           </div>
                         </td>
@@ -1167,8 +1748,11 @@ const BillingPOS = () => {
                 </thead>
                 <tbody>
                   {bills.map(bill => (
-                    <tr key={bill.id} data-testid={`bill-row-${bill.invoice_no}`}>
-                      <td className="invoice-no">{bill.invoice_no}</td>
+                    <tr key={bill.id} data-testid={`bill-row-${bill.invoice_no}`} style={bill.is_return ? { background: 'rgba(211, 47, 47, 0.1)' } : {}}>
+                      <td className="invoice-no">
+                        {bill.invoice_no}
+                        {bill.is_return && <span className="tag" style={{ background: 'var(--danger)', marginLeft: 6 }}>RETURN</span>}
+                      </td>
                       <td>{new Date(bill.created_at).toLocaleString()}</td>
                       <td>
                         {bill.customer_name || 'Guest'}
@@ -1182,13 +1766,24 @@ const BillingPOS = () => {
                         <span className="tag">{bill.payment_method}</span>
                       </td>
                       <td>
-                        <button
-                          data-testid={`view-bill-${bill.invoice_no}`}
-                          className="btn btn-sm"
-                          onClick={() => setShowReceipt(bill)}
-                        >
-                          View
-                        </button>
+                        <div className="table-actions" style={{ flexWrap: 'wrap' }}>
+                          <button
+                            data-testid={`view-bill-${bill.invoice_no}`}
+                            className="btn btn-sm"
+                            onClick={() => setShowReceipt(bill)}
+                          >
+                            View
+                          </button>
+                          {!bill.is_return && (
+                            <button
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleReturnBill(bill)}
+                              data-testid={`return-bill-${bill.invoice_no}`}
+                            >
+                              Return
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1436,22 +2031,41 @@ const BillingPOS = () => {
                 <div className="report-cards">
                   <div className="card">
                     <h3 className="card-title">Top 5 Selling Products</h3>
-                    {reportData.top_products.map((product, idx) => (
-                      <div key={idx} className="report-item">
-                        <span>{product.name}</span>
-                        <span className="report-value">{product.quantity} sold</span>
-                      </div>
-                    ))}
+                    {reportData.top_products.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={reportData.top_products}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                          <XAxis dataKey="name" stroke="var(--text-secondary)" style={{ fontSize: 11 }} />
+                          <YAxis stroke="var(--text-secondary)" />
+                          <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--accent)' }} />
+                          <Bar dataKey="quantity" fill="#f5a623" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : <p>No sales data</p>}
                   </div>
 
                   <div className="card">
                     <h3 className="card-title">Payment Method Breakdown</h3>
-                    {Object.entries(reportData.payment_breakdown).map(([method, amount]) => (
-                      <div key={method} className="report-item">
-                        <span>{method}</span>
-                        <span className="report-value amount-text">{formatCurrency(amount)}</span>
-                      </div>
-                    ))}
+                    {Object.keys(reportData.payment_breakdown).length > 0 ? (
+                      <ResponsiveContainer width="100%" height={250}>
+                        <PieChart>
+                          <Pie
+                            data={Object.entries(reportData.payment_breakdown).map(([name, value]) => ({ name, value }))}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={(entry) => `${entry.name}: ₹${entry.value.toFixed(0)}`}
+                            outerRadius={80}
+                            dataKey="value"
+                          >
+                            {Object.entries(reportData.payment_breakdown).map((_, idx) => (
+                              <Cell key={idx} fill={['#f5a623', '#4ecdc4', '#45b7d1', '#f093fb', '#43e97b'][idx % 5]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--accent)' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : <p>No payment data</p>}
                   </div>
                 </div>
               </>
@@ -1535,6 +2149,96 @@ const BillingPOS = () => {
               </div>
 
               <div className="card">
+                <h3 className="card-title">Receipt & Logo</h3>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Shop Logo</label>
+                    <input
+                      className="input"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                    />
+                    {settings.logo_url && (
+                      <div style={{ marginTop: 8 }}>
+                        <img src={settings.logo_url} alt="Logo" style={{ maxHeight: 60, background: '#fff', padding: 4, borderRadius: 4 }} />
+                        <button className="btn btn-sm btn-danger" style={{ marginLeft: 8 }} onClick={() => setSettings({ ...settings, logo_url: '' })}>Remove</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="form-group">
+                    <label>Receipt Header Text</label>
+                    <input
+                      className="input"
+                      placeholder="e.g. Welcome to our store"
+                      value={settings.receipt_header}
+                      onChange={(e) => setSettings({ ...settings, receipt_header: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Receipt Footer Text</label>
+                    <input
+                      className="input"
+                      placeholder="e.g. Thank you for your business!"
+                      value={settings.receipt_footer}
+                      onChange={(e) => setSettings({ ...settings, receipt_footer: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Receipt Size</label>
+                    <select
+                      className="input"
+                      value={settings.receipt_size}
+                      onChange={(e) => setSettings({ ...settings, receipt_size: e.target.value })}
+                    >
+                      <option value="A4">A4 (Standard Printer)</option>
+                      <option value="80mm">80mm (Thermal Printer)</option>
+                      <option value="58mm">58mm (Thermal Printer Mini)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <h3 className="card-title">Loyalty Program</h3>
+                <div className="settings-options">
+                  <div className="setting-item">
+                    <span>Enable Loyalty Points</span>
+                    <button
+                      className={`btn ${settings.loyalty_enabled ? 'btn-success' : 'btn-danger'}`}
+                      onClick={() => setSettings({ ...settings, loyalty_enabled: !settings.loyalty_enabled })}
+                    >
+                      {settings.loyalty_enabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  {settings.loyalty_enabled && (
+                    <>
+                      <div className="form-group">
+                        <label>Points earned per ₹100 spent</label>
+                        <input
+                          className="input"
+                          type="number"
+                          step="0.1"
+                          value={settings.loyalty_rate}
+                          onChange={(e) => setSettings({ ...settings, loyalty_rate: parseFloat(e.target.value) || 1 })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Value per point when redeeming (₹)</label>
+                        <input
+                          className="input"
+                          type="number"
+                          step="0.1"
+                          value={settings.loyalty_redeem_rate}
+                          onChange={(e) => setSettings({ ...settings, loyalty_redeem_rate: parseFloat(e.target.value) || 0.5 })}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="card">
                 <h3 className="card-title">POS Options</h3>
                 <div className="settings-options">
                   <div className="setting-item">
@@ -1597,13 +2301,17 @@ const BillingPOS = () => {
       {/* Receipt Modal */}
       {showReceipt && (
         <div className="modal-overlay" onClick={() => setShowReceipt(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
+          <div className="modal receipt-modal" data-receipt-size={settings.receipt_size} onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
             <div className="receipt-header">
+              {settings.logo_url && (
+                <img src={settings.logo_url} alt="Logo" style={{ maxHeight: 60, marginBottom: 8, background: '#fff', padding: 4, borderRadius: 4 }} />
+              )}
               <h2>{settings.shop_name}</h2>
               {settings.gstin && <div>GSTIN: {settings.gstin}</div>}
               {settings.address && <div>{settings.address}</div>}
               {settings.phone && <div>Phone: {settings.phone}</div>}
               {settings.email && <div>Email: {settings.email}</div>}
+              {settings.receipt_header && <div style={{ marginTop: 8, fontStyle: 'italic' }}>{settings.receipt_header}</div>}
             </div>
 
             <div className="receipt-info">
@@ -1668,10 +2376,34 @@ const BillingPOS = () => {
                   <span className="balance-text">{formatCurrency(showReceipt.balance_amount)}</span>
                 </div>
               )}
-              <div className="summary-line">
-                <span>Payment Method:</span>
-                <span>{showReceipt.payment_method}</span>
-              </div>
+              {showReceipt.loyalty_earned > 0 && (
+                <div className="summary-line">
+                  <span>⭐ Loyalty Earned:</span>
+                  <span>{showReceipt.loyalty_earned} points</span>
+                </div>
+              )}
+              {showReceipt.loyalty_redeemed > 0 && (
+                <div className="summary-line">
+                  <span>⭐ Loyalty Redeemed:</span>
+                  <span>{showReceipt.loyalty_redeemed} points</span>
+                </div>
+              )}
+              {showReceipt.payment_splits && showReceipt.payment_splits.length > 0 ? (
+                <>
+                  <div className="summary-line"><strong>Payment Splits:</strong></div>
+                  {showReceipt.payment_splits.map((s, i) => (
+                    <div key={i} className="summary-line">
+                      <span>  {s.method}:</span>
+                      <span>{formatCurrency(s.amount)}</span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="summary-line">
+                  <span>Payment Method:</span>
+                  <span>{showReceipt.payment_method}</span>
+                </div>
+              )}
               {showReceipt.payment_method === 'Cash' && (
                 <>
                   <div className="summary-line">
@@ -1689,7 +2421,7 @@ const BillingPOS = () => {
             </div>
 
             <div className="receipt-footer">
-              Thank you for your business!
+              {settings.receipt_footer || 'Thank you for your business!'}
             </div>
 
             <div className="modal-actions">
@@ -1889,6 +2621,82 @@ const BillingPOS = () => {
             <div className="modal-actions">
               <button className="btn" onClick={() => setEditingCustomer(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleUpdateCustomerBalance} data-testid="save-balance-btn">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Adjustment Modal */}
+      {showStockAdjModal && (
+        <div className="modal-overlay" onClick={() => setShowStockAdjModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 450 }}>
+            <h3 className="modal-title">Adjust Stock: {showStockAdjModal.name}</h3>
+            <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+              <div className="form-group">
+                <label>Current Stock: <strong>{showStockAdjModal.stock} {showStockAdjModal.unit}</strong></label>
+              </div>
+              <div className="form-group">
+                <label>Quantity Change (use - for decrease)</label>
+                <input
+                  className="input"
+                  type="number"
+                  placeholder="e.g. +10 or -5"
+                  value={stockAdjQty}
+                  onChange={(e) => setStockAdjQty(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>Reason *</label>
+                <select className="input" value={stockAdjReason} onChange={(e) => setStockAdjReason(e.target.value)}>
+                  <option value="">Select reason...</option>
+                  <option value="Damaged">Damaged</option>
+                  <option value="Expired">Expired</option>
+                  <option value="Lost/Missing">Lost/Missing</option>
+                  <option value="Returned to Supplier">Returned to Supplier</option>
+                  <option value="New Stock Received">New Stock Received</option>
+                  <option value="Counting Error">Counting Error</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              {stockAdjQty && (
+                <div className="form-group">
+                  <strong>New Stock will be: {showStockAdjModal.stock + (parseInt(stockAdjQty) || 0)}</strong>
+                </div>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setShowStockAdjModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleStockAdjustment}>Save Adjustment</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barcode Generator Modal */}
+      {showBarcodeFor && (
+        <div className="modal-overlay" onClick={() => setShowBarcodeFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400, textAlign: 'center' }}>
+            <h3 className="modal-title">Barcode: {showBarcodeFor.name}</h3>
+            <div style={{ background: '#fff', padding: 20, borderRadius: 8, margin: '20px 0' }}>
+              <svg viewBox="0 0 200 80" style={{ width: '100%', maxWidth: 280 }}>
+                <rect width="200" height="80" fill="#fff" />
+                {showBarcodeFor.barcode.split('').map((c, i) => {
+                  const code = c.charCodeAt(0);
+                  const w = (code % 3) + 1;
+                  const x = 10 + i * 12;
+                  return <rect key={i} x={x} y="10" width={w} height="50" fill="#000" />;
+                })}
+                <text x="100" y="75" textAnchor="middle" fontFamily="monospace" fontSize="12" fill="#000">
+                  {showBarcodeFor.barcode}
+                </text>
+              </svg>
+              <div style={{ color: '#000', marginTop: 8, fontWeight: 'bold' }}>
+                {showBarcodeFor.name} - {formatCurrency(showBarcodeFor.price)}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setShowBarcodeFor(null)}>Close</button>
+              <button className="btn btn-primary" onClick={() => downloadBarcode(showBarcodeFor)}>Download PNG</button>
             </div>
           </div>
         </div>

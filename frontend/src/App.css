@@ -1051,15 +1051,52 @@ select.input {
     background: white;
     color: black;
     border: none;
+    box-shadow: none;
   }
   .modal * {
     color: black !important;
+    background: white !important;
+  }
+  .modal img {
+    background: white !important;
   }
   .btn {
     display: none;
   }
   .modal-actions {
     display: none;
+  }
+  /* Thermal 80mm */
+  .receipt-modal[data-receipt-size="80mm"] {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    font-size: 10px !important;
+    padding: 4mm !important;
+  }
+  .receipt-modal[data-receipt-size="80mm"] h2 {
+    font-size: 14px !important;
+  }
+  .receipt-modal[data-receipt-size="80mm"] .total-line {
+    font-size: 12px !important;
+  }
+  /* Thermal 58mm */
+  .receipt-modal[data-receipt-size="58mm"] {
+    width: 58mm !important;
+    max-width: 58mm !important;
+    font-size: 9px !important;
+    padding: 2mm !important;
+  }
+  .receipt-modal[data-receipt-size="58mm"] h2 {
+    font-size: 12px !important;
+  }
+  .receipt-modal[data-receipt-size="58mm"] .total-line {
+    font-size: 11px !important;
+  }
+  .receipt-modal[data-receipt-size="58mm"] table {
+    font-size: 8px !important;
+  }
+  @page {
+    margin: 0;
   }
 }
 

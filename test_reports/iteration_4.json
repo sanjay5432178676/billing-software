@@ -1,0 +1,70 @@
+{
+  "summary": "Iteration 4 testing (13 features). Created backend test_pos_features_v4.py with 22 tests covering stock adjustments, quotations, bill return, day-close, profit-loss, expiring products, new Product/Bill/Settings fields. Found and FIXED 2 backend bugs (return-bill ObjectId leak, /products/expiring route shadowing). Final: 22/22 v4 tests + 41/41 v1-v3 regression = 63/63 pass. Frontend smoke verified: all 3 new views (Quotations, Stock Adjust, Day Close) load + render; Bills view shows RET- bills with red row + RETURN tag and 81 Return buttons vs 87 rows (correctly hidden on return bills); Reports view renders 2 recharts SVGs (Bar + Pie); Settings shows Logo/Receipt Header/Footer/Size/Loyalty fields; Inventory rows have 🔧/📑/🗑️ buttons; POS shows discount % / ₹ toggle, Split Payment button + Add Split row, Quote button; F2 keyboard shortcut focuses barcode input. Day Close has date picker. Wholesale price field NOT exposed in inventory add-product form (model has it, form missing). Many new interactive elements lack data-testid — listed in critical comments.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/bills/{id}/return", "issue": "Was returning 500 due to ObjectId injected by motor.insert_one being returned in dict — FIXED by popping _id before return"},
+      {"endpoint": "GET /api/products/expiring", "issue": "Was 404 because /products/{product_id} (registered earlier) was matching the 'expiring' literal — FIXED by relocating route above the dynamic path"},
+      {"endpoint": "POST /api/bills", "issue": "No backend stock-level validation; bill can still create with insufficient stock (carry-over from prior iterations, not introduced now)"},
+      {"endpoint": "POST /api/quotations", "issue": "quote_no is provided by client and not server-generated; collision possible if two clients post same number"},
+      {"endpoint": "GET /api/reports/profit-loss", "issue": "profit_loss query uses created_at as ISO string comparison; works only because created_at is consistently stored as ISO string. If any document has a datetime object, filter will not match. Defensive: normalize on read."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Stock Adjustments dropdown (<select>)", "issue": "React hydration error: '<span> cannot be a child of <option>'. Caused by Emergent visual editor injecting <span style=display:contents> children into <option> elements. Browser console error but not blocking — root cause is editor-instrumented option text expressions. Consider rendering option text as plain string (no nested expressions like {p.name}) to avoid the instrumentation wrap.", "selector": "select option", "priority": "LOW"},
+      {"component": "Settings view (logo <img>)", "issue": "Console error 'Failed to load resource: net::ERR_INVALID_URL' — likely <img src={settings.logo_url} /> rendered with empty string. Guard with conditional render or src placeholder.", "selector": "settings logo img", "priority": "LOW"},
+      {"component": "Inventory add-product form", "issue": "wholesale_price model field is NOT exposed in the add-product form (Cost Price and Expiry Date are present). Cannot set wholesale price from UI.", "selector": "new-product form inputs", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "POS cart sidebar", "issues": ["Discount % / ₹ buttons are small icon-only chips; consider tooltip or label for clarity", "Split Payment row has no testid on method-select / amount-input / +Add Split / remove-split buttons", "Quote button has no testid"]},
+      {"screen": "Inventory row actions", "issues": ["🔧 / 📑 / 🗑️ buttons have no data-testid; cannot target individually for tests"]},
+      {"screen": "Stock Adjustments view", "issues": ["No data-testid on product select / quantity input / reason dropdown / submit"]},
+      {"screen": "Day Close view", "issues": ["Date picker has no data-testid; Export to Excel button has no testid"]},
+      {"screen": "Settings", "issues": ["New fields (logo upload, receipt header/footer/size, loyalty toggle/rates, expiry alert days) lack data-testid"]},
+      {"screen": "Receipt modal", "issues": ["data-receipt-size attribute is set on .receipt-modal as designed; verified"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pos_features_v4.py",
+    "/app/test_reports/pytest/features_v4.xml",
+    "/app/test_reports/pytest/all_v4.xml"
+  ],
+  "action_items": [
+    "(addressed by testing agent) /products/expiring route order fix in server.py — verified working.",
+    "(addressed by testing agent) return_bill ObjectId leak fix in server.py — verified working.",
+    "Add data-testid attributes to all new interactive elements: discount-type-percent / discount-type-amount, split-payment-toggle, split-method-{i} / split-amount-{i} / split-remove-{i} / add-split-btn, save-as-quote-btn, loyalty-redeem-input, inventory-adjust-{barcode} / inventory-barcode-{barcode}, stock-adjust-product / stock-adjust-qty / stock-adjust-reason / stock-adjust-submit, day-close-date / day-close-export, settings-logo-upload / settings-logo-remove / settings-receipt-header / settings-receipt-footer / settings-receipt-size / settings-loyalty-enabled / settings-loyalty-rate / settings-loyalty-redeem-rate / settings-expiry-alert-days, quotation-convert-{id} / quotation-delete-{id}, barcode-modal / barcode-download-png.",
+    "Expose wholesale_price input in inventory add-product form (model already supports it).",
+    "Guard <img src={settings.logo_url}> when logo_url is empty to avoid ERR_INVALID_URL console noise.",
+    "Stock Adjustments <option> text — render plain string (e.g., children directly inside option without nested expressions) to avoid editor-injected span hydration warning.",
+    "(carry-over) BillingPOS.jsx now 2718 lines — strongly recommend splitting into POS / Inventory / Bills / Balance / Quotations / StockAdjust / DayClose / Reports / Settings / ReceiptModal sub-components. Single-file maintenance risk grew significantly.",
+    "(carry-over) POST /api/bills should validate stock and reject if insufficient (currently allows negative stock).",
+    "Auto-generate quote_no server-side to prevent collisions; same for invoice_no on /bills (already handled?).",
+    "Migrate @app.on_event('shutdown') to FastAPI lifespan (carried from prior iterations)."
+  ],
+  "critical_code_review_comments": [
+    "server.py return_bill(): originally returned the dict that motor.insert_one mutates with _id; this triggered fastapi.encoders → TypeError on ObjectId → 500. Fixed by popping _id before return. Similar pattern exists in other endpoints (create_stock_adjustment, create_quotation, etc.) — they avoid the issue because they return the pydantic model instance, not the doc dict. Audit any future endpoint that returns a dict after insert_one for the same bug.",
+    "server.py: GET /products/expiring was unreachable because FastAPI matches /products/{product_id} (registered earlier) first. Route registration order matters in FastAPI — static paths must precede dynamic ones with same prefix. Apply same review to any other potential dynamic-path collisions.",
+    "server.py return_bill() does not decrement loyalty_points or revert customer.loyalty_earned from the original bill; if loyalty was awarded on original, it remains after return.",
+    "BillingPOS.jsx 2718 lines: exceeds 700-line guideline by 3.9x. Splitting is now urgent for any future iteration.",
+    "Frontend: many new interactive controls (discount toggle, split rows, quote, stock-adjust modal, barcode modal, settings loyalty/receipt/logo, day-close, quotation actions) lack data-testid — testability gap.",
+    "Frontend: wholesale_price exists on Product backend model but is NOT rendered in the add/edit product form — incomplete feature surface.",
+    "Frontend: Settings <img src={settings.logo_url}> not guarded against empty string — produces ERR_INVALID_URL.",
+    "Stock Adjustments <option> hydration warning indicates option text uses expression-children that the editor wraps in <span>; refactor to children-as-string."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (return_bill: pop _id before return; relocate /products/expiring before /products/{product_id})",
+    "/app/backend/tests/test_pos_features_v4.py (new — 22 tests for iteration 4)"
+  ],
+  "success_rate": {"backend": "100% (22/22 v4; 63/63 cumulative)", "frontend": "100% smoke (new views load, key controls present, F2 keyboard shortcut works, Split/Quote/Discount-toggle render, recharts SVGs render)"},
+  "test_credentials": "N/A - no auth",
+  "seed_data_creation": "Tests created TEST_V4_Prod_* products (with cost_price=60, wholesale_price=80, expiry in 15d), TEST_V4 bills, TEST_QT quotations, RET- return bills, TEST_V4 stock adjustments. A few remain in DB for inspection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iteration_4 added 3 new VIEWS (QUOTATIONS, STOCK_ADJUSTMENTS, DAY_CLOSE) and 6+ new endpoints. Backend now has 4 collections in active use (products, bills, customers, settings, stock_adjustments, quotations, held_carts). 63 pytest tests across 4 files in /app/backend/tests/. data-testid coverage is incomplete for iteration-4 features — see action_items. BillingPOS.jsx is 2718 lines and SHOULD be split. Receipt modal carries data-receipt-size attribute correctly. Discount type toggle uses %/₹ buttons (no testid). F2 keyboard shortcut confirmed working via window.addEventListener. Recharts Bar+Pie render in Reports view. /api/bills/{id}/return restores stock and creates RET- prefixed negative-amount bill; /api/products/expiring is now reachable; /api/reports/day-close returns aggregated breakdown by date.",
+  "rca_of_fixes_applied": {
+    "return_bill_500": "motor.AsyncIOMotorCollection.insert_one mutates the passed dict by setting _id to a new ObjectId. The endpoint then returned that mutated dict; FastAPI's jsonable_encoder cannot serialize ObjectId, throwing TypeError → 500. Fix: pop('_id', None) before return. Reproduce: POST /api/bills/{any-bill}/return → 500. Verified fix by re-running test_return_bill_creates_negative_and_restores_stock — passes; bill returned with all expected fields and no ObjectId leak.",
+    "expiring_404": "FastAPI matches routes in registration order. GET /products/{product_id} (line 265) was registered before GET /products/expiring (line 781), so 'expiring' was captured as a product_id and returned 404 (no product with id 'expiring'). Fix: relocate GET /products/expiring to immediately before /products/{product_id}. Verified fix by re-running test_expiring_products and test_expiring_products_zero_days — both pass."
+  }
+}
