@@ -679,6 +679,18 @@ const BillingPOS = () => {
           <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="theme-btn">
             {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? 'Light' : 'Dark'} Mode
           </button>
+          <div style={{
+            textAlign: 'center',
+            marginTop: '10px',
+            padding: '8px',
+            borderTop: '1px solid var(--border)',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            lineHeight: '1.4'
+          }}>
+            <div style={{ fontWeight: '600', fontSize: '12px', color: 'var(--accent)' }}>SS Technologies</div>
+            <div>Powered by SS Technologies</div>
+          </div>
         </div>
       </div>
 
