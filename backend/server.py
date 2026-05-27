@@ -814,3 +814,493 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEW FEATURE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Supplier & Purchase Order ─────────────────────────────────────────────────
+class Supplier(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    gstin: str = ""
+    contact_person: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class SupplierCreate(BaseModel):
+    name: str
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    gstin: str = ""
+    contact_person: str = ""
+
+class POItem(BaseModel):
+    product_id: str
+    product_name: str
+    quantity: int
+    unit_cost: float
+    total_cost: float
+    hsn_code: str = ""
+
+class PurchaseOrder(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    po_number: str
+    supplier_id: str
+    supplier_name: str
+    items: List[POItem]
+    subtotal: float
+    tax_amount: float = 0.0
+    total: float
+    status: str = "pending"   # pending | received | cancelled
+    notes: str = ""
+    expected_date: Optional[str] = None
+    received_date: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class PurchaseOrderCreate(BaseModel):
+    po_number: str
+    supplier_id: str
+    supplier_name: str
+    items: List[POItem]
+    subtotal: float
+    tax_amount: float = 0.0
+    total: float
+    notes: str = ""
+    expected_date: Optional[str] = None
+
+# ── Branch & User ─────────────────────────────────────────────────────────────
+class Branch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    address: str = ""
+    phone: str = ""
+    gstin: str = ""
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BranchCreate(BaseModel):
+    name: str
+    address: str = ""
+    phone: str = ""
+    gstin: str = ""
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    username: str
+    role: str = "cashier"   # admin | manager | cashier
+    branch_id: str = ""
+    branch_name: str = ""
+    is_active: bool = True
+    pin: str = ""            # 4-digit PIN (stored as plain text for simplicity)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class UserCreate(BaseModel):
+    name: str
+    username: str
+    role: str = "cashier"
+    branch_id: str = ""
+    branch_name: str = ""
+    pin: str = ""
+
+# ── Loyalty Points ────────────────────────────────────────────────────────────
+class LoyaltyTransaction(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_phone: str
+    customer_name: str
+    points: int                  # positive = earned, negative = redeemed
+    type: str                    # "earned" | "redeemed" | "adjusted"
+    reference: str = ""          # invoice_no or description
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class LoyaltySettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "loyalty_settings"
+    enabled: bool = True
+    points_per_rupee: float = 1.0     # points earned per ₹ spent
+    rupees_per_point: float = 0.10    # ₹ value of 1 point on redemption
+    min_redeem_points: int = 100
+    expiry_days: int = 365
+
+# ── P&L Report Expense Categories ────────────────────────────────────────────
+class ProfitLossReport(BaseModel):
+    period: str
+    total_revenue: float
+    total_cogs: float
+    gross_profit: float
+    total_expenses: float
+    net_profit: float
+    margin_percent: float
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUPPLIER ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/suppliers", response_model=List[Supplier])
+async def get_suppliers(search: Optional[str] = None):
+    query = {}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}},
+        ]
+    docs = await db.suppliers.find(query, {"_id": 0}).to_list(1000)
+    for d in docs:
+        if isinstance(d.get("created_at"), str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+    return docs
+
+@api_router.post("/suppliers", response_model=Supplier)
+async def create_supplier(data: SupplierCreate):
+    obj = Supplier(**data.model_dump())
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.suppliers.insert_one(doc)
+    return obj
+
+@api_router.put("/suppliers/{supplier_id}", response_model=Supplier)
+async def update_supplier(supplier_id: str, data: SupplierCreate):
+    await db.suppliers.update_one({"id": supplier_id}, {"$set": data.model_dump()})
+    doc = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    if isinstance(doc.get("created_at"), str):
+        doc["created_at"] = datetime.fromisoformat(doc["created_at"])
+    return doc
+
+@api_router.delete("/suppliers/{supplier_id}")
+async def delete_supplier(supplier_id: str):
+    result = await db.suppliers.delete_one({"id": supplier_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return {"message": "Supplier deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PURCHASE ORDER ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/purchase-orders", response_model=List[PurchaseOrder])
+async def get_purchase_orders(status: Optional[str] = None, supplier_id: Optional[str] = None):
+    query = {}
+    if status:
+        query["status"] = status
+    if supplier_id:
+        query["supplier_id"] = supplier_id
+    docs = await db.purchase_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for d in docs:
+        if isinstance(d.get("created_at"), str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+    return docs
+
+@api_router.post("/purchase-orders", response_model=PurchaseOrder)
+async def create_purchase_order(data: PurchaseOrderCreate):
+    obj = PurchaseOrder(**data.model_dump())
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.purchase_orders.insert_one(doc)
+    return obj
+
+@api_router.put("/purchase-orders/{po_id}/receive")
+async def receive_purchase_order(po_id: str):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    if po["status"] == "received":
+        raise HTTPException(status_code=400, detail="PO already received")
+    # Update stock for each item
+    for item in po["items"]:
+        await db.products.update_one(
+            {"id": item["product_id"]},
+            {"$inc": {"stock": item["quantity"]}}
+        )
+        # Log stock adjustment
+        from datetime import timezone as tz
+        adj = {
+            "id": str(uuid.uuid4()),
+            "product_id": item["product_id"],
+            "product_name": item["product_name"],
+            "adjustment_type": "add",
+            "quantity": item["quantity"],
+            "previous_stock": 0,
+            "new_stock": 0,
+            "reason": f"Purchase Order {po['po_number']}",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.stock_adjustments.insert_one(adj)
+    from datetime import timezone as _tz
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {"status": "received", "received_date": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": "PO received, stock updated"}
+
+@api_router.put("/purchase-orders/{po_id}/cancel")
+async def cancel_purchase_order(po_id: str):
+    result = await db.purchase_orders.update_one(
+        {"id": po_id, "status": "pending"},
+        {"$set": {"status": "cancelled"}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="PO not found or not pending")
+    return {"message": "PO cancelled"}
+
+@api_router.delete("/purchase-orders/{po_id}")
+async def delete_purchase_order(po_id: str):
+    result = await db.purchase_orders.delete_one({"id": po_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="PO not found")
+    return {"message": "PO deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BRANCH ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/branches", response_model=List[Branch])
+async def get_branches():
+    docs = await db.branches.find({}, {"_id": 0}).to_list(100)
+    for d in docs:
+        if isinstance(d.get("created_at"), str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+    return docs
+
+@api_router.post("/branches", response_model=Branch)
+async def create_branch(data: BranchCreate):
+    obj = Branch(**data.model_dump())
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.branches.insert_one(doc)
+    return obj
+
+@api_router.put("/branches/{branch_id}", response_model=Branch)
+async def update_branch(branch_id: str, data: BranchCreate):
+    await db.branches.update_one({"id": branch_id}, {"$set": data.model_dump()})
+    doc = await db.branches.find_one({"id": branch_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    if isinstance(doc.get("created_at"), str):
+        doc["created_at"] = datetime.fromisoformat(doc["created_at"])
+    return doc
+
+@api_router.delete("/branches/{branch_id}")
+async def delete_branch(branch_id: str):
+    result = await db.branches.delete_one({"id": branch_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return {"message": "Branch deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/users", response_model=List[User])
+async def get_users():
+    docs = await db.users.find({}, {"_id": 0}).to_list(200)
+    for d in docs:
+        if isinstance(d.get("created_at"), str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+    return docs
+
+@api_router.post("/users", response_model=User)
+async def create_user(data: UserCreate):
+    existing = await db.users.find_one({"username": data.username})
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    obj = User(**data.model_dump())
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.users.insert_one(doc)
+    return obj
+
+@api_router.put("/users/{user_id}", response_model=User)
+async def update_user(user_id: str, data: UserCreate):
+    await db.users.update_one({"id": user_id}, {"$set": data.model_dump()})
+    doc = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    if isinstance(doc.get("created_at"), str):
+        doc["created_at"] = datetime.fromisoformat(doc["created_at"])
+    return doc
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str):
+    result = await db.users.delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User deleted"}
+
+@api_router.post("/users/verify-pin")
+async def verify_pin(username: str, pin: str):
+    user = await db.users.find_one({"username": username, "pin": pin, "is_active": True}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if isinstance(user.get("created_at"), str):
+        user["created_at"] = datetime.fromisoformat(user["created_at"])
+    return user
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOYALTY POINTS ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/loyalty/settings", response_model=LoyaltySettings)
+async def get_loyalty_settings():
+    doc = await db.loyalty_settings.find_one({"id": "loyalty_settings"}, {"_id": 0})
+    if not doc:
+        default = LoyaltySettings()
+        await db.loyalty_settings.insert_one(default.model_dump())
+        return default
+    return doc
+
+@api_router.put("/loyalty/settings", response_model=LoyaltySettings)
+async def update_loyalty_settings(data: LoyaltySettings):
+    doc = data.model_dump()
+    await db.loyalty_settings.update_one({"id": "loyalty_settings"}, {"$set": doc}, upsert=True)
+    return data
+
+@api_router.get("/loyalty/customer/{phone}")
+async def get_customer_loyalty(phone: str):
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    points = customer.get("loyalty_points", 0)
+    txns = await db.loyalty_transactions.find(
+        {"customer_phone": phone}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return {"points": points, "transactions": txns}
+
+@api_router.post("/loyalty/earn")
+async def earn_points(customer_phone: str, customer_name: str, bill_total: float, invoice_no: str):
+    ls = await db.loyalty_settings.find_one({"id": "loyalty_settings"}, {"_id": 0})
+    ppr = ls.get("points_per_rupee", 1.0) if ls else 1.0
+    points = int(bill_total * ppr)
+    if points <= 0:
+        return {"points_earned": 0}
+    await db.customers.update_one({"phone": customer_phone}, {"$inc": {"loyalty_points": points}})
+    txn = LoyaltyTransaction(
+        customer_phone=customer_phone,
+        customer_name=customer_name,
+        points=points,
+        type="earned",
+        reference=invoice_no
+    )
+    doc = txn.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.loyalty_transactions.insert_one(doc)
+    return {"points_earned": points}
+
+@api_router.post("/loyalty/redeem")
+async def redeem_points(customer_phone: str, customer_name: str, points: int, invoice_no: str):
+    customer = await db.customers.find_one({"phone": customer_phone}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    current_points = customer.get("loyalty_points", 0)
+    if current_points < points:
+        raise HTTPException(status_code=400, detail=f"Insufficient points. Available: {current_points}")
+    ls = await db.loyalty_settings.find_one({"id": "loyalty_settings"}, {"_id": 0})
+    rpp = ls.get("rupees_per_point", 0.10) if ls else 0.10
+    discount_amount = round(points * rpp, 2)
+    await db.customers.update_one({"phone": customer_phone}, {"$inc": {"loyalty_points": -points}})
+    txn = LoyaltyTransaction(
+        customer_phone=customer_phone,
+        customer_name=customer_name,
+        points=-points,
+        type="redeemed",
+        reference=invoice_no
+    )
+    doc = txn.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.loyalty_transactions.insert_one(doc)
+    return {"points_redeemed": points, "discount_amount": discount_amount}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROFIT & LOSS REPORT ROUTE
+# ═══════════════════════════════════════════════════════════════════════════════
+@api_router.get("/reports/profit-loss")
+async def get_profit_loss(
+    period: str = "month",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    from datetime import timedelta
+    query: Dict[str, Any] = {}
+    if start_date and end_date:
+        query["created_at"] = {"$gte": start_date, "$lte": end_date}
+    elif period != "all":
+        now = datetime.now(timezone.utc)
+        if period == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            start = now - timedelta(days=7)
+        elif period == "month":
+            start = now - timedelta(days=30)
+        elif period == "year":
+            start = now - timedelta(days=365)
+        else:
+            start = None
+        if start:
+            query["created_at"] = {"$gte": start.isoformat()}
+
+    bills = await db.bills.find(query, {"_id": 0}).to_list(100000)
+    pos = await db.purchase_orders.find(
+        {"status": "received"}, {"_id": 0}
+    ).to_list(100000)
+
+    total_revenue = sum(b["total"] for b in bills)
+    total_tax_collected = sum(b.get("tax_amount", 0) for b in bills)
+    total_discounts = sum(b.get("discount_amount", 0) for b in bills)
+    total_cogs = sum(
+        sum(item["unit_cost"] * item["quantity"] for item in po["items"])
+        for po in pos
+    )
+    gross_profit = total_revenue - total_cogs
+    gross_margin = round((gross_profit / total_revenue * 100), 2) if total_revenue else 0
+
+    # Sum expenses stored in a hypothetical expenses collection (frontend uses localStorage now)
+    # We'll return zeros so frontend can add its own localStorage expenses
+    total_expenses = 0.0
+    net_profit = gross_profit - total_expenses
+
+    # Build daily revenue trend (last 30 days or filtered period)
+    from collections import defaultdict
+    daily: Dict[str, float] = defaultdict(float)
+    for b in bills:
+        day = b["created_at"][:10] if isinstance(b["created_at"], str) else b["created_at"].isoformat()[:10]
+        daily[day] += b["total"]
+    daily_trend = [{"date": k, "revenue": v} for k, v in sorted(daily.items())]
+
+    # Category breakdown
+    cat_revenue: Dict[str, float] = defaultdict(float)
+    for b in bills:
+        for item in b.get("items", []):
+            # We don't have category in bill items; group by product name as fallback
+            cat_revenue[item.get("name", "Unknown")] += item["price"] * item["quantity"]
+    top_items = sorted(
+        [{"name": k, "revenue": v} for k, v in cat_revenue.items()],
+        key=lambda x: x["revenue"], reverse=True
+    )[:10]
+
+    return {
+        "period": period,
+        "total_revenue": total_revenue,
+        "total_cogs": total_cogs,
+        "gross_profit": gross_profit,
+        "gross_margin_percent": gross_margin,
+        "total_tax_collected": total_tax_collected,
+        "total_discounts": total_discounts,
+        "total_expenses": total_expenses,
+        "net_profit": net_profit,
+        "total_bills": len(bills),
+        "avg_bill_value": round(total_revenue / len(bills), 2) if bills else 0,
+        "daily_trend": daily_trend,
+        "top_items": top_items,
+    }
