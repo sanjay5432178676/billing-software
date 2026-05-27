@@ -10,6 +10,7 @@ const DISCOUNT_OPTIONS = [0, 5, 10, 15, 20];
 const CATEGORIES = ['All', 'Food', 'Beverages', 'Electronics', 'Clothing', 'Medicines', 'Stationery'];
 const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Credit', 'Wallet'];
 const VIEWS = {
+  DASHBOARD: 'dashboard',
   POS: 'pos',
   INVENTORY: 'inventory',
   BILLS: 'bills',
@@ -18,12 +19,14 @@ const VIEWS = {
   BALANCE: 'balance',
   LOW_STOCK: 'low_stock',
   DAY_CLOSE: 'day_close',
+  STOCK_ADJUSTMENTS: 'stock_adjustments',
+  QUOTATIONS: 'quotations',
   SETTINGS: 'settings'
 };
 
 const BillingPOS = () => {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-  const [view, setView] = useState(VIEWS.POS);
+  const [view, setView] = useState(VIEWS.DASHBOARD);
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [heldCarts, setHeldCarts] = useState([]);
@@ -76,6 +79,28 @@ const BillingPOS = () => {
   const [dayCloseData, setDayCloseData] = useState(null);
   const [dayCloseLoading, setDayCloseLoading] = useState(false);
   
+  // Stock Adjustments state
+  const [stockAdjustments, setStockAdjustments] = useState([]);
+  const [adjProduct, setAdjProduct] = useState('');
+  const [adjType, setAdjType] = useState('add');
+  const [adjQty, setAdjQty] = useState('');
+  const [adjReason, setAdjReason] = useState('');
+  const [adjLoading, setAdjLoading] = useState(false);
+
+  // Quotations state
+  const [quotations, setQuotations] = useState([]);
+  const [quotCart, setQuotCart] = useState([]);
+  const [quotCustomerName, setQuotCustomerName] = useState('');
+  const [quotCustomerPhone, setQuotCustomerPhone] = useState('');
+  const [quotDiscount, setQuotDiscount] = useState(0);
+  const [quotValidUntil, setQuotValidUntil] = useState('');
+  const [quotNotes, setQuotNotes] = useState('');
+  const [showQuotation, setShowQuotation] = useState(null);
+  const [quotSearch, setQuotSearch] = useState('');
+
+  // Dashboard state
+  const [dashData, setDashData] = useState(null);
+
   const barcodeRef = useRef(null);
 
   useEffect(() => {
@@ -101,6 +126,24 @@ const BillingPOS = () => {
       fetchDayClose();
     }
   }, [view, dayCloseDate]);
+
+  useEffect(() => {
+    if (view === VIEWS.STOCK_ADJUSTMENTS) {
+      fetchStockAdjustments();
+    }
+  }, [view]);
+
+  useEffect(() => {
+    if (view === VIEWS.QUOTATIONS) {
+      fetchQuotations();
+    }
+  }, [view]);
+
+  useEffect(() => {
+    if (view === VIEWS.DASHBOARD) {
+      fetchDashboard();
+    }
+  }, [view]);
 
   useEffect(() => {
     if (view === VIEWS.BILLS) {
@@ -201,6 +244,145 @@ const BillingPOS = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Day Close');
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     saveAs(new Blob([buf]), `day-close-${dayCloseDate}.xlsx`);
+  };
+
+  const fetchDashboard = async () => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const [summaryRes, dayRes, customersRes, productsRes] = await Promise.all([
+        axios.get(`${API}/reports/summary`, { params: { period: 'today' } }),
+        axios.get(`${API}/reports/day-close`, { params: { date: today } }),
+        axios.get(`${API}/customers`),
+        axios.get(`${API}/products`)
+      ]);
+      setDashData({
+        today: summaryRes.data,
+        dayClose: dayRes.data,
+        totalCustomers: customersRes.data.length,
+        totalProducts: productsRes.data.length,
+        outstandingBalance: customersRes.data.reduce((s, c) => s + (c.balance || 0), 0),
+        lowStockCount: productsRes.data.filter(p => p.stock <= 10 && p.stock > 0).length,
+        outOfStock: productsRes.data.filter(p => p.stock === 0).length,
+      });
+    } catch (error) {
+      console.error('Dashboard error:', error);
+    }
+  };
+
+  const fetchStockAdjustments = async () => {
+    try {
+      const res = await axios.get(`${API}/stock-adjustments`);
+      setStockAdjustments(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      showNotification('Error fetching adjustments', 'error');
+    }
+  };
+
+  const handleStockAdjustment = async () => {
+    if (!adjProduct || !adjQty) {
+      showNotification('Select product and enter quantity', 'error');
+      return;
+    }
+    setAdjLoading(true);
+    try {
+      await axios.post(`${API}/stock-adjustments`, {
+        product_id: adjProduct,
+        adjustment_type: adjType,
+        quantity: parseInt(adjQty),
+        reason: adjReason
+      });
+      showNotification('Stock adjusted successfully', 'success');
+      setAdjProduct('');
+      setAdjQty('');
+      setAdjReason('');
+      await fetchStockAdjustments();
+      await loadData();
+    } catch (error) {
+      showNotification('Error adjusting stock', 'error');
+    } finally {
+      setAdjLoading(false);
+    }
+  };
+
+  const fetchQuotations = async () => {
+    try {
+      const res = await axios.get(`${API}/quotations`);
+      setQuotations(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      showNotification('Error fetching quotations', 'error');
+    }
+  };
+
+  const addToQuotCart = (product) => {
+    const existing = quotCart.find(i => i.product_id === product.id);
+    if (existing) {
+      setQuotCart(quotCart.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+    } else {
+      setQuotCart([...quotCart, { product_id: product.id, name: product.name, price: product.price, quantity: 1, hsn_code: product.hsn_code || '' }]);
+    }
+  };
+
+  const calculateQuotation = () => {
+    const subtotal = quotCart.reduce((s, i) => s + i.price * i.quantity, 0);
+    const discountAmount = subtotal * (quotDiscount / 100);
+    const taxable = subtotal - discountAmount;
+    const taxAmount = settings.tax_enabled ? taxable * (settings.tax_percent / 100) : 0;
+    const total = taxable + taxAmount;
+    return { subtotal, discountAmount, taxAmount, total };
+  };
+
+  const handleCreateQuotation = async () => {
+    if (quotCart.length === 0) { showNotification('Add items to quotation', 'error'); return; }
+    const { subtotal, discountAmount, taxAmount, total } = calculateQuotation();
+    const quotNo = 'QT-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.floor(Math.random()*10000).toString().padStart(4,'0');
+    try {
+      const res = await axios.post(`${API}/quotations`, {
+        quotation_no: quotNo,
+        items: quotCart,
+        subtotal,
+        discount_percent: quotDiscount,
+        discount_amount: discountAmount,
+        tax_amount: taxAmount,
+        tax_percent: settings.tax_percent,
+        total,
+        customer_name: quotCustomerName,
+        customer_phone: quotCustomerPhone,
+        valid_until: quotValidUntil || null,
+        notes: quotNotes
+      });
+      showNotification('Quotation created!', 'success');
+      setShowQuotation(res.data);
+      setQuotCart([]);
+      setQuotCustomerName('');
+      setQuotCustomerPhone('');
+      setQuotDiscount(0);
+      setQuotValidUntil('');
+      setQuotNotes('');
+      fetchQuotations();
+    } catch (error) {
+      showNotification('Error creating quotation', 'error');
+    }
+  };
+
+  const handleConvertQuotation = async (quotation) => {
+    setCart(quotation.items);
+    setCustomerName(quotation.customer_name || '');
+    setCustomerPhone(quotation.customer_phone || '');
+    await axios.put(`${API}/quotations/${quotation.id}/status`, null, { params: { status: 'converted' } });
+    fetchQuotations();
+    setView(VIEWS.POS);
+    showNotification('Quotation loaded into POS!', 'success');
+  };
+
+  const handleDeleteQuotation = async (id) => {
+    if (!window.confirm('Delete this quotation?')) return;
+    try {
+      await axios.delete(`${API}/quotations/${id}`);
+      showNotification('Quotation deleted', 'success');
+      fetchQuotations();
+    } catch (error) {
+      showNotification('Error deleting quotation', 'error');
+    }
   };
 
   const fetchBills = async () => {
@@ -633,8 +815,11 @@ const BillingPOS = () => {
         
         <nav className="nav-menu">
           {[
+            { id: VIEWS.DASHBOARD, icon: '🏠', label: 'Dashboard' },
             { id: VIEWS.POS, icon: '🛒', label: 'Point of Sale' },
             { id: VIEWS.INVENTORY, icon: '📦', label: 'Inventory' },
+            { id: VIEWS.STOCK_ADJUSTMENTS, icon: '🔧', label: 'Stock Adjust' },
+            { id: VIEWS.QUOTATIONS, icon: '📋', label: 'Quotations' },
             { id: VIEWS.BILLS, icon: '🧾', label: 'Bill History' },
             { id: VIEWS.CUSTOMERS, icon: '👥', label: 'Customers' },
             { id: VIEWS.BALANCE, icon: '💰', label: 'Balance' },
@@ -1662,6 +1847,333 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Dashboard View */}
+        {view === VIEWS.DASHBOARD && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🏠 Dashboard</h2>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+            </div>
+
+            {!dashData ? (
+              <div style={{ textAlign: 'center', padding: '60px', fontSize: '18px' }}>⏳ Loading dashboard...</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: '8px', fontWeight: 600, color: 'var(--text-muted)', fontSize: '13px', letterSpacing: 1 }}>TODAY'S SUMMARY</div>
+                <div className="stats-grid">
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.BILLS)}>
+                    <div className="stat-label">Today's Revenue</div>
+                    <div className="stat-value amount-text">{formatCurrency(dashData.today.total_revenue || 0)}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>{dashData.today.total_bills || 0} bills</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Tax Collected</div>
+                    <div className="stat-value">{formatCurrency(dashData.today.total_tax || 0)}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>GST</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Discounts Given</div>
+                    <div className="stat-value" style={{ color: 'var(--warning)' }}>{formatCurrency(dashData.today.total_discount || 0)}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>Today</div>
+                  </div>
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.BALANCE)}>
+                    <div className="stat-label">Outstanding Balance</div>
+                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(dashData.outstandingBalance || 0)}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>Credit due</div>
+                  </div>
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.CUSTOMERS)}>
+                    <div className="stat-label">Total Customers</div>
+                    <div className="stat-value">{dashData.totalCustomers}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>Registered</div>
+                  </div>
+                  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.LOW_STOCK)}>
+                    <div className="stat-label">Low Stock Items</div>
+                    <div className="stat-value" style={{ color: dashData.lowStockCount > 0 ? 'var(--warning)' : 'var(--success)' }}>{dashData.lowStockCount}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: 4 }}>{dashData.outOfStock} out of stock</div>
+                  </div>
+                </div>
+
+                <div className="report-cards" style={{ marginTop: 20 }}>
+                  <div className="card">
+                    <h3 className="card-title">💳 Today's Payment Breakdown</h3>
+                    {dashData.dayClose && Object.entries(dashData.dayClose.payment_breakdown || {}).length > 0 ? (
+                      Object.entries(dashData.dayClose.payment_breakdown).map(([method, amount]) => (
+                        <div key={method} className="report-item">
+                          <span style={{ textTransform: 'capitalize' }}>{method}</span>
+                          <span className="report-value amount-text">{formatCurrency(amount)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No transactions today</div>
+                    )}
+                  </div>
+
+                  <div className="card">
+                    <h3 className="card-title">🏆 Top Selling Today</h3>
+                    {dashData.dayClose && dashData.dayClose.top_products && dashData.dayClose.top_products.length > 0 ? (
+                      dashData.dayClose.top_products.slice(0, 5).map((p, i) => (
+                        <div key={i} className="report-item">
+                          <span>{i + 1}. {p.name}</span>
+                          <span className="report-value">{p.quantity} sold</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No sales today</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="report-cards" style={{ marginTop: 0 }}>
+                  <div className="card">
+                    <h3 className="card-title">⚡ Quick Actions</h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+                      <button className="btn btn-primary" onClick={() => setView(VIEWS.POS)}>🛒 New Sale</button>
+                      <button className="btn" onClick={() => setView(VIEWS.QUOTATIONS)}>📋 New Quotation</button>
+                      <button className="btn" onClick={() => setView(VIEWS.STOCK_ADJUSTMENTS)}>🔧 Adjust Stock</button>
+                      <button className="btn" onClick={() => setView(VIEWS.DAY_CLOSE)}>🔒 Day Close</button>
+                      <button className="btn" onClick={() => setView(VIEWS.REPORTS)}>📊 Reports</button>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <h3 className="card-title">📦 Inventory Status</h3>
+                    <div className="report-item">
+                      <span>Total Products</span>
+                      <span className="report-value">{dashData.totalProducts}</span>
+                    </div>
+                    <div className="report-item">
+                      <span>Low Stock</span>
+                      <span className="report-value" style={{ color: 'var(--warning)' }}>{dashData.lowStockCount} items</span>
+                    </div>
+                    <div className="report-item">
+                      <span>Out of Stock</span>
+                      <span className="report-value" style={{ color: 'var(--danger)' }}>{dashData.outOfStock} items</span>
+                    </div>
+                    <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setView(VIEWS.INVENTORY)}>View Inventory →</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Stock Adjustments View */}
+        {view === VIEWS.STOCK_ADJUSTMENTS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🔧 Stock Adjustments</h2>
+            </div>
+
+            <div className="card add-product-card">
+              <h3 className="card-title">New Adjustment</h3>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>Product *</label>
+                  <select className="input" value={adjProduct} onChange={e => setAdjProduct(e.target.value)}>
+                    <option value="">-- Select Product --</option>
+                    {products.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} (Current: {p.stock} {p.unit})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Adjustment Type *</label>
+                  <select className="input" value={adjType} onChange={e => setAdjType(e.target.value)}>
+                    <option value="add">➕ Add Stock</option>
+                    <option value="remove">➖ Remove Stock</option>
+                    <option value="set">🔄 Set Stock (Override)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Quantity *</label>
+                  <input className="input" type="number" min="1" placeholder="Enter quantity" value={adjQty} onChange={e => setAdjQty(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>Reason</label>
+                  <input className="input" placeholder="e.g. Damaged goods, New purchase, Stock count..." value={adjReason} onChange={e => setAdjReason(e.target.value)} />
+                </div>
+              </div>
+              {adjProduct && adjQty && (() => {
+                const prod = products.find(p => p.id === adjProduct);
+                if (!prod) return null;
+                const qty = parseInt(adjQty) || 0;
+                const newStock = adjType === 'add' ? prod.stock + qty : adjType === 'remove' ? Math.max(0, prod.stock - qty) : qty;
+                return (
+                  <div style={{ padding: '10px 16px', background: 'var(--card-bg)', borderRadius: 8, marginBottom: 12, fontSize: 14 }}>
+                    Preview: <strong>{prod.name}</strong> stock will change from <strong style={{ color: 'var(--warning)' }}>{prod.stock}</strong> → <strong style={{ color: 'var(--success)' }}>{newStock}</strong>
+                  </div>
+                );
+              })()}
+              <button className="btn btn-primary" onClick={handleStockAdjustment} disabled={adjLoading}>
+                {adjLoading ? '⏳ Saving...' : '✅ Apply Adjustment'}
+              </button>
+            </div>
+
+            <div className="card" style={{ marginTop: 20 }}>
+              <h3 className="card-title">Adjustment History</h3>
+              {stockAdjustments.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No adjustments yet</div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Type</th>
+                        <th>Qty</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Reason</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockAdjustments.map(a => (
+                        <tr key={a.id}>
+                          <td><strong>{a.product_name}</strong></td>
+                          <td>
+                            <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 12, background: a.adjustment_type === 'add' ? 'var(--success)' : a.adjustment_type === 'remove' ? 'var(--danger)' : 'var(--warning)', color: 'white' }}>
+                              {a.adjustment_type === 'add' ? '➕ Add' : a.adjustment_type === 'remove' ? '➖ Remove' : '🔄 Set'}
+                            </span>
+                          </td>
+                          <td>{a.quantity}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{a.previous_stock}</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{a.new_stock}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{a.reason || '-'}</td>
+                          <td>{new Date(a.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Quotations View */}
+        {view === VIEWS.QUOTATIONS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">📋 Quotations</h2>
+            </div>
+
+            {/* Create Quotation */}
+            <div className="card add-product-card">
+              <h3 className="card-title">Create New Quotation</h3>
+              <div className="form-grid">
+                <input className="input" placeholder="Customer Name" value={quotCustomerName} onChange={e => setQuotCustomerName(e.target.value)} />
+                <input className="input" placeholder="Customer Phone" value={quotCustomerPhone} onChange={e => setQuotCustomerPhone(e.target.value)} />
+                <div className="form-group">
+                  <label>Valid Until</label>
+                  <input className="input date-input" type="date" value={quotValidUntil} onChange={e => setQuotValidUntil(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>Discount %</label>
+                  <input className="input" type="number" min="0" max="100" placeholder="0" value={quotDiscount} onChange={e => setQuotDiscount(parseFloat(e.target.value) || 0)} />
+                </div>
+              </div>
+              <input className="input" placeholder="Notes (optional)" value={quotNotes} onChange={e => setQuotNotes(e.target.value)} style={{ marginBottom: 12 }} />
+
+              <div style={{ marginBottom: 10, fontWeight: 600, fontSize: 13, color: 'var(--text-muted)' }}>ADD PRODUCTS</div>
+              <div className="products-grid" style={{ maxHeight: 280, overflowY: 'auto', marginBottom: 12 }}>
+                {products.map(p => (
+                  <div key={p.id} className="product-card" onClick={() => addToQuotCart(p)} style={{ cursor: 'pointer' }}>
+                    <div className="product-name">{p.name}</div>
+                    <div className="product-footer">
+                      <span className="product-price">{formatCurrency(p.price)}</span>
+                      <span className="product-stock">Stock: {p.stock}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {quotCart.length > 0 && (
+                <>
+                  <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: 'var(--text-muted)' }}>QUOTATION ITEMS</div>
+                  <div className="table-container" style={{ marginBottom: 12 }}>
+                    <table className="data-table">
+                      <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+                      <tbody>
+                        {quotCart.map(item => (
+                          <tr key={item.product_id}>
+                            <td>{item.name}</td>
+                            <td>{formatCurrency(item.price)}</td>
+                            <td>
+                              <input type="number" className="input qty-input" min="1" value={item.quantity}
+                                onChange={e => setQuotCart(quotCart.map(i => i.product_id === item.product_id ? { ...i, quantity: parseInt(e.target.value) || 1 } : i))} />
+                            </td>
+                            <td>{formatCurrency(item.price * item.quantity)}</td>
+                            <td><button className="btn btn-danger btn-sm" onClick={() => setQuotCart(quotCart.filter(i => i.product_id !== item.product_id))}>✕</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {(() => {
+                    const { subtotal, discountAmount, taxAmount, total } = calculateQuotation();
+                    return (
+                      <div className="bill-summary" style={{ marginBottom: 12 }}>
+                        <div className="summary-line"><span>Subtotal:</span><span>{formatCurrency(subtotal)}</span></div>
+                        {discountAmount > 0 && <div className="summary-line"><span>Discount ({quotDiscount}%):</span><span className="discount-text">- {formatCurrency(discountAmount)}</span></div>}
+                        {settings.tax_enabled && <div className="summary-line"><span>GST ({settings.tax_percent}%):</span><span>{formatCurrency(taxAmount)}</span></div>}
+                        <div className="summary-line total-line"><span>Total:</span><span>{formatCurrency(total)}</span></div>
+                      </div>
+                    );
+                  })()}
+                  <button className="btn btn-primary" onClick={handleCreateQuotation}>📋 Save Quotation</button>
+                </>
+              )}
+            </div>
+
+            {/* Quotation List */}
+            <div className="card" style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 className="card-title" style={{ margin: 0 }}>All Quotations</h3>
+                <input className="input" placeholder="Search quotations..." value={quotSearch} onChange={e => setQuotSearch(e.target.value)} style={{ width: 220 }} />
+              </div>
+              {quotations.filter(q => !quotSearch || q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) || (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase())).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No quotations found</div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Quotation No</th><th>Customer</th><th>Items</th><th>Total</th><th>Valid Until</th><th>Status</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody>
+                      {quotations
+                        .filter(q => !quotSearch || q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) || (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase()))
+                        .map(q => (
+                          <tr key={q.id}>
+                            <td><strong>{q.quotation_no}</strong></td>
+                            <td>{q.customer_name || '-'}<br/><span className="sub-text">{q.customer_phone}</span></td>
+                            <td>{q.items.length} items</td>
+                            <td className="amount-text">{formatCurrency(q.total)}</td>
+                            <td>{q.valid_until ? new Date(q.valid_until).toLocaleDateString() : '-'}</td>
+                            <td>
+                              <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 12, background: q.status === 'converted' ? 'var(--success)' : q.status === 'expired' ? 'var(--danger)' : 'var(--warning)', color: 'white' }}>
+                                {q.status}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="table-actions">
+                                <button className="btn btn-sm" onClick={() => setShowQuotation(q)}>View</button>
+                                {q.status === 'pending' && (
+                                  <button className="btn btn-sm btn-primary" onClick={() => handleConvertQuotation(q)}>→ POS</button>
+                                )}
+                                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteQuotation(q.id)}>Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Settings View */}
         {view === VIEWS.SETTINGS && (
           <div className="content-view">
@@ -2092,6 +2604,55 @@ const BillingPOS = () => {
             <div className="modal-actions">
               <button className="btn" onClick={() => setEditingCustomer(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleUpdateCustomerBalance} data-testid="save-balance-btn">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quotation Modal */}
+      {showQuotation && (
+        <div className="modal-overlay" onClick={() => setShowQuotation(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="receipt-header">
+              <h2>{settings.shop_name}</h2>
+              {settings.gstin && <div>GSTIN: {settings.gstin}</div>}
+              {settings.address && <div>{settings.address}</div>}
+              {settings.phone && <div>Phone: {settings.phone}</div>}
+            </div>
+            <div className="receipt-info">
+              <div><strong>Quotation: {showQuotation.quotation_no}</strong></div>
+              <div>{new Date(showQuotation.created_at).toLocaleString()}</div>
+              {showQuotation.customer_name && <div>Customer: {showQuotation.customer_name}</div>}
+              {showQuotation.customer_phone && <div>Phone: {showQuotation.customer_phone}</div>}
+              {showQuotation.valid_until && <div>Valid Until: {new Date(showQuotation.valid_until).toLocaleDateString()}</div>}
+            </div>
+            <div className="receipt-items">
+              <table>
+                <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                <tbody>
+                  {showQuotation.items.map((item, idx) => (
+                    <tr key={idx}>
+                      <td>{item.name}</td>
+                      <td>{item.quantity}</td>
+                      <td>{formatCurrency(item.price)}</td>
+                      <td>{formatCurrency(item.price * item.quantity)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="receipt-totals">
+              <div className="summary-line"><span>Subtotal:</span><span>{formatCurrency(showQuotation.subtotal)}</span></div>
+              {showQuotation.discount_amount > 0 && <div className="summary-line"><span>Discount ({showQuotation.discount_percent}%):</span><span className="discount-text">- {formatCurrency(showQuotation.discount_amount)}</span></div>}
+              {showQuotation.tax_amount > 0 && <div className="summary-line"><span>GST ({showQuotation.tax_percent}%):</span><span>{formatCurrency(showQuotation.tax_amount)}</span></div>}
+              <div className="summary-line total-line"><span>Total:</span><span>{formatCurrency(showQuotation.total)}</span></div>
+            </div>
+            {showQuotation.notes && <div style={{ padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)' }}>Notes: {showQuotation.notes}</div>}
+            <div className="receipt-footer">This is a quotation, not a tax invoice.</div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => window.print()}>Print</button>
+              {showQuotation.status === 'pending' && <button className="btn btn-primary" onClick={() => { handleConvertQuotation(showQuotation); setShowQuotation(null); }}>→ Convert to Bill</button>}
+              <button className="btn" onClick={() => setShowQuotation(null)}>Close</button>
             </div>
           </div>
         </div>
