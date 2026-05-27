@@ -23,7 +23,15 @@ const VIEWS = {
   QUOTATIONS: 'quotations',
   RETURNS: 'returns',
   EXPENSES: 'expenses',
-  SETTINGS: 'settings'
+  SETTINGS: 'settings',
+  SUPPLIERS: 'suppliers',
+  PURCHASE_ORDERS: 'purchase_orders',
+  BRANCHES: 'branches',
+  USERS: 'users',
+  LOYALTY: 'loyalty',
+  ANALYTICS: 'analytics',
+  THERMAL_PRINT: 'thermal_print',
+  BARCODE_LABELS: 'barcode_labels',
 };
 
 const TAX_RATES = [0, 5, 12, 18, 28];
@@ -119,6 +127,52 @@ const BillingPOS = () => {
   const [expenseSearch, setExpenseSearch] = useState('');
   const EXPENSE_CATEGORIES = ['Rent', 'Electricity', 'Salary', 'Purchase', 'Transport', 'Maintenance', 'Other'];
 
+  // ── Suppliers & Purchase Orders ──────────────────────────────────────
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierForm, setSupplierForm] = useState({ name:'', phone:'', email:'', address:'', gstin:'', contact_person:'' });
+  const [editSupplier, setEditSupplier] = useState(null);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [poForm, setPoForm] = useState({ supplier_id:'', supplier_name:'', notes:'', expected_date:'', items:[] });
+  const [poProductSearch, setPoProductSearch] = useState('');
+  const [poView, setPoView] = useState('list'); // 'list' | 'create'
+  const [poFilter, setPoFilter] = useState('all');
+
+  // ── Branches & Users ─────────────────────────────────────────────────
+  const [branches, setBranches] = useState([]);
+  const [branchForm, setBranchForm] = useState({ name:'', address:'', phone:'', gstin:'' });
+  const [editBranch, setEditBranch] = useState(null);
+  const [appUsers, setAppUsers] = useState([]);
+  const [userForm, setUserForm] = useState({ name:'', username:'', role:'cashier', branch_id:'', branch_name:'', pin:'' });
+  const [editUser, setEditUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('pos_current_user') || 'null'));
+  const [loginForm, setLoginForm] = useState({ username:'', pin:'' });
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [multibranchTab, setMultibranchTab] = useState('branches'); // 'branches' | 'users'
+
+  // ── Loyalty ──────────────────────────────────────────────────────────
+  const [loyaltySettings, setLoyaltySettings] = useState({ enabled:true, points_per_rupee:1.0, rupees_per_point:0.10, min_redeem_points:100, expiry_days:365 });
+  const [loyaltyInfo, setLoyaltyInfo] = useState(null);   // { points, transactions }
+  const [redeemPoints, setRedeemPoints] = useState('');
+  const [loyaltyDiscount, setLoyaltyDiscount] = useState(0);
+
+  // ── Analytics / P&L ─────────────────────────────────────────────────
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState('month');
+  const [analyticsStart, setAnalyticsStart] = useState('');
+  const [analyticsEnd, setAnalyticsEnd] = useState('');
+
+  // ── Thermal Print ────────────────────────────────────────────────────
+  const [thermalWidth, setThermalWidth] = useState(() => localStorage.getItem('thermal_width') || '80');
+  const [thermalFont, setThermalFont] = useState(() => localStorage.getItem('thermal_font') || '12');
+  const [thermalBill, setThermalBill] = useState(null);
+
+  // ── Barcode Labels ───────────────────────────────────────────────────
+  const [barcodeProducts, setBarcodeProducts] = useState([]);
+  const [barcodeSearch, setBarcodeSearchState] = useState('');
+  const [barcodeQty, setBarcodeQty] = useState({});
+  const [labelSize, setLabelSize] = useState('small'); // 'small'|'medium'|'large'
+
   const barcodeRef = useRef(null);
 
   useEffect(() => {
@@ -201,6 +255,29 @@ const BillingPOS = () => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (view === VIEWS.SUPPLIERS) fetchSuppliers();
+    if (view === VIEWS.PURCHASE_ORDERS) { fetchSuppliers(); fetchPurchaseOrders(); }
+    if (view === VIEWS.BRANCHES || view === VIEWS.USERS) { fetchBranches(); fetchAppUsers(); }
+    if (view === VIEWS.LOYALTY) fetchLoyaltySettings();
+    if (view === VIEWS.ANALYTICS) fetchAnalytics();
+    if (view === VIEWS.BARCODE_LABELS) setBarcodeProducts(products);
+  }, [view]);
+
+  useEffect(() => {
+    if (view === VIEWS.ANALYTICS) fetchAnalytics();
+  }, [analyticsPeriod, analyticsStart, analyticsEnd]);
+
+  useEffect(() => {
+    if (customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled) {
+      fetchLoyaltyInfo(customerPhone);
+    } else {
+      setLoyaltyInfo(null);
+      setLoyaltyDiscount(0);
+      setRedeemPoints('');
+    }
+  }, [customerPhone]);
 
   const loadData = async () => {
     try {
@@ -654,19 +731,21 @@ const BillingPOS = () => {
     }
 
     const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
+    // Apply loyalty discount on top
+    const effectiveTotal = Math.max(0, total - loyaltyDiscount);
     const paid = parseFloat(customerPaid) || 0;
     
     let finalBalanceAmount = 0;
     let finalCashReceived = 0;
     let finalChangeGiven = 0;
 
-    if (paid >= total) {
+    if (paid >= effectiveTotal) {
       finalCashReceived = paid;
-      finalChangeGiven = paid - total;
+      finalChangeGiven = paid - effectiveTotal;
       finalBalanceAmount = 0;
     } else {
       finalCashReceived = paid;
-      finalBalanceAmount = total - paid;
+      finalBalanceAmount = effectiveTotal - paid;
       finalChangeGiven = 0;
       if (!customerPhone) {
         showNotification('Customer phone required for partial payment', 'error');
@@ -675,15 +754,16 @@ const BillingPOS = () => {
     }
 
     try {
+      const invoiceNo = generateInvoiceNo();
       const billData = {
-        invoice_no: generateInvoiceNo(),
+        invoice_no: invoiceNo,
         items: cart,
         subtotal,
         discount_percent: discount,
-        discount_amount: discountAmount,
+        discount_amount: discountAmount + loyaltyDiscount,
         tax_amount: taxAmount,
         tax_percent: settings.tax_percent,
-        total,
+        total: effectiveTotal,
         payment_method: paymentMethod,
         cash_received: finalCashReceived,
         change_given: finalChangeGiven,
@@ -696,18 +776,36 @@ const BillingPOS = () => {
       const res = await axios.post(`${API}/bills`, billData);
       showNotification('Bill generated successfully', 'success');
       setShowReceipt(res.data);
-      
+
+      // Handle loyalty: redeem used points & earn new ones
+      if (customerPhone && loyaltySettings.enabled) {
+        const earnPhone = customerPhone;
+        const earnName = customerName || 'Customer';
+        if (loyaltyDiscount > 0 && redeemPoints) {
+          try { await axios.post(`${API}/loyalty/redeem`, null, { params: { customer_phone: earnPhone, customer_name: earnName, points: parseInt(redeemPoints), invoice_no: invoiceNo } }); } catch(e) {}
+        }
+        try { await axios.post(`${API}/loyalty/earn`, null, { params: { customer_phone: earnPhone, customer_name: earnName, bill_total: effectiveTotal, invoice_no: invoiceNo } }); } catch(e) {}
+      }
+
+      // WhatsApp auto-send if customer has phone
+      if (settings.auto_print && customerPhone) {
+        setTimeout(() => sendBillViaWhatsApp(res.data), 800);
+      }
+
       setCart([]);
       setDiscountPercent(0);
       setCustomDiscount('');
       setCustomerPaid('');
       setCustomerName('');
       setCustomerPhone('');
+      setLoyaltyDiscount(0);
+      setRedeemPoints('');
+      setLoyaltyInfo(null);
       
       await loadData();
       
       if (settings.auto_print) {
-        setTimeout(() => window.print(), 500);
+        setTimeout(() => printThermal(res.data), 500);
       }
     } catch (error) {
       showNotification('Error generating bill', 'error');
@@ -816,6 +914,328 @@ const BillingPOS = () => {
       `Hello ${customer.name},\n\nThis is a reminder about your pending balance of ${formatCurrency(customer.balance)} at ${settings.shop_name}.\n\nPlease clear the balance at your earliest convenience.\n\nThank you!`
     );
     window.open(`https://wa.me/${customer.phone}?text=${message}`, '_blank');
+  };
+
+  // ══════════════════════════════════════════════════════════════════════
+  // NEW FEATURE FUNCTIONS
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── Suppliers ──────────────────────────────────────────────────────────
+  const fetchSuppliers = async () => {
+    try {
+      const res = await axios.get(`${API}/suppliers`);
+      setSuppliers(Array.isArray(res.data) ? res.data : []);
+    } catch (e) { showNotification('Error fetching suppliers', 'error'); }
+  };
+
+  const handleSaveSupplier = async () => {
+    if (!supplierForm.name) { showNotification('Supplier name required', 'error'); return; }
+    try {
+      if (editSupplier) {
+        await axios.put(`${API}/suppliers/${editSupplier.id}`, supplierForm);
+        setEditSupplier(null);
+      } else {
+        await axios.post(`${API}/suppliers`, supplierForm);
+      }
+      setSupplierForm({ name:'', phone:'', email:'', address:'', gstin:'', contact_person:'' });
+      showNotification('Supplier saved', 'success');
+      fetchSuppliers();
+    } catch (e) { showNotification('Error saving supplier', 'error'); }
+  };
+
+  const handleDeleteSupplier = async (id) => {
+    if (!window.confirm('Delete this supplier?')) return;
+    await axios.delete(`${API}/suppliers/${id}`);
+    showNotification('Supplier deleted', 'success');
+    fetchSuppliers();
+  };
+
+  // ── Purchase Orders ────────────────────────────────────────────────────
+  const fetchPurchaseOrders = async () => {
+    try {
+      const params = poFilter !== 'all' ? { status: poFilter } : {};
+      const res = await axios.get(`${API}/purchase-orders`, { params });
+      setPurchaseOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (e) { showNotification('Error fetching purchase orders', 'error'); }
+  };
+
+  const addPoItem = (product) => {
+    const exists = poForm.items.find(i => i.product_id === product.id);
+    if (exists) {
+      setPoForm(f => ({ ...f, items: f.items.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + 1, total_cost: (i.quantity + 1) * i.unit_cost } : i) }));
+    } else {
+      setPoForm(f => ({ ...f, items: [...f.items, { product_id: product.id, product_name: product.name, quantity: 1, unit_cost: product.price * 0.7, total_cost: product.price * 0.7, hsn_code: product.hsn_code || '' }] }));
+    }
+  };
+
+  const updatePoItem = (pid, field, val) => {
+    setPoForm(f => ({ ...f, items: f.items.map(i => {
+      if (i.product_id !== pid) return i;
+      const updated = { ...i, [field]: parseFloat(val) || 0 };
+      updated.total_cost = updated.quantity * updated.unit_cost;
+      return updated;
+    })}));
+  };
+
+  const removePoItem = (pid) => {
+    setPoForm(f => ({ ...f, items: f.items.filter(i => i.product_id !== pid) }));
+  };
+
+  const handleCreatePO = async () => {
+    if (!poForm.supplier_id || poForm.items.length === 0) { showNotification('Select supplier and add items', 'error'); return; }
+    const subtotal = poForm.items.reduce((s, i) => s + i.total_cost, 0);
+    const poNumber = 'PO-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.floor(Math.random()*10000).toString().padStart(4,'0');
+    try {
+      await axios.post(`${API}/purchase-orders`, { ...poForm, po_number: poNumber, subtotal, total: subtotal });
+      showNotification('Purchase order created!', 'success');
+      setPoForm({ supplier_id:'', supplier_name:'', notes:'', expected_date:'', items:[] });
+      setPoView('list');
+      fetchPurchaseOrders();
+    } catch (e) { showNotification('Error creating PO', 'error'); }
+  };
+
+  const handleReceivePO = async (id) => {
+    if (!window.confirm('Mark this PO as received? This will update inventory stock.')) return;
+    try {
+      await axios.put(`${API}/purchase-orders/${id}/receive`);
+      showNotification('PO received! Stock updated.', 'success');
+      fetchPurchaseOrders();
+      loadData();
+    } catch (e) { showNotification(e.response?.data?.detail || 'Error receiving PO', 'error'); }
+  };
+
+  const handleCancelPO = async (id) => {
+    if (!window.confirm('Cancel this purchase order?')) return;
+    try {
+      await axios.put(`${API}/purchase-orders/${id}/cancel`);
+      showNotification('PO cancelled', 'success');
+      fetchPurchaseOrders();
+    } catch (e) { showNotification('Error cancelling PO', 'error'); }
+  };
+
+  // ── Branches & Users ───────────────────────────────────────────────────
+  const fetchBranches = async () => {
+    try {
+      const res = await axios.get(`${API}/branches`);
+      setBranches(Array.isArray(res.data) ? res.data : []);
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchAppUsers = async () => {
+    try {
+      const res = await axios.get(`${API}/users`);
+      setAppUsers(Array.isArray(res.data) ? res.data : []);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSaveBranch = async () => {
+    if (!branchForm.name) { showNotification('Branch name required', 'error'); return; }
+    try {
+      if (editBranch) {
+        await axios.put(`${API}/branches/${editBranch.id}`, branchForm);
+        setEditBranch(null);
+      } else {
+        await axios.post(`${API}/branches`, branchForm);
+      }
+      setBranchForm({ name:'', address:'', phone:'', gstin:'' });
+      showNotification('Branch saved', 'success');
+      fetchBranches();
+    } catch (e) { showNotification('Error saving branch', 'error'); }
+  };
+
+  const handleDeleteBranch = async (id) => {
+    if (!window.confirm('Delete this branch?')) return;
+    await axios.delete(`${API}/branches/${id}`);
+    showNotification('Branch deleted', 'success');
+    fetchBranches();
+  };
+
+  const handleSaveUser = async () => {
+    if (!userForm.name || !userForm.username) { showNotification('Name and username required', 'error'); return; }
+    if (!userForm.pin || userForm.pin.length !== 4) { showNotification('4-digit PIN required', 'error'); return; }
+    try {
+      if (editUser) {
+        await axios.put(`${API}/users/${editUser.id}`, userForm);
+        setEditUser(null);
+      } else {
+        await axios.post(`${API}/users`, userForm);
+      }
+      setUserForm({ name:'', username:'', role:'cashier', branch_id:'', branch_name:'', pin:'' });
+      showNotification('User saved', 'success');
+      fetchAppUsers();
+    } catch (e) { showNotification(e.response?.data?.detail || 'Error saving user', 'error'); }
+  };
+
+  const handleDeleteUser = async (id) => {
+    if (!window.confirm('Delete this user?')) return;
+    await axios.delete(`${API}/users/${id}`);
+    showNotification('User deleted', 'success');
+    fetchAppUsers();
+  };
+
+  const handleLogin = async () => {
+    if (!loginForm.username || !loginForm.pin) { showNotification('Enter username and PIN', 'error'); return; }
+    try {
+      const res = await axios.post(`${API}/users/verify-pin`, null, { params: { username: loginForm.username, pin: loginForm.pin } });
+      setCurrentUser(res.data);
+      localStorage.setItem('pos_current_user', JSON.stringify(res.data));
+      setShowLoginModal(false);
+      setLoginForm({ username:'', pin:'' });
+      showNotification(`Welcome, ${res.data.name}!`, 'success');
+    } catch (e) { showNotification('Invalid username or PIN', 'error'); }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('pos_current_user');
+    showNotification('Logged out', 'success');
+  };
+
+  // ── Loyalty ────────────────────────────────────────────────────────────
+  const fetchLoyaltySettings = async () => {
+    try {
+      const res = await axios.get(`${API}/loyalty/settings`);
+      setLoyaltySettings(res.data);
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchLoyaltyInfo = async (phone) => {
+    try {
+      const res = await axios.get(`${API}/loyalty/customer/${phone}`);
+      setLoyaltyInfo(res.data);
+    } catch (e) { setLoyaltyInfo(null); }
+  };
+
+  const handleRedeemLoyalty = () => {
+    const pts = parseInt(redeemPoints) || 0;
+    if (!loyaltyInfo || pts <= 0) { showNotification('Enter points to redeem', 'error'); return; }
+    if (pts < loyaltySettings.min_redeem_points) { showNotification(`Minimum ${loyaltySettings.min_redeem_points} points required`, 'error'); return; }
+    if (pts > loyaltyInfo.points) { showNotification('Insufficient points', 'error'); return; }
+    const discount = pts * loyaltySettings.rupees_per_point;
+    setLoyaltyDiscount(discount);
+    showNotification(`₹${discount.toFixed(2)} loyalty discount applied!`, 'success');
+  };
+
+  const handleSaveLoyaltySettings = async () => {
+    try {
+      await axios.put(`${API}/loyalty/settings`, { id: 'loyalty_settings', ...loyaltySettings });
+      showNotification('Loyalty settings saved', 'success');
+    } catch (e) { showNotification('Error saving loyalty settings', 'error'); }
+  };
+
+  // ── Analytics ──────────────────────────────────────────────────────────
+  const fetchAnalytics = async () => {
+    try {
+      const params = { period: analyticsPeriod };
+      if (analyticsStart) params.start_date = new Date(analyticsStart).toISOString();
+      if (analyticsEnd) params.end_date = new Date(analyticsEnd + 'T23:59:59').toISOString();
+      const res = await axios.get(`${API}/reports/profit-loss`, { params });
+      // Merge local expenses
+      const localExpenses = JSON.parse(localStorage.getItem('pos_expenses') || '[]');
+      const totalExpenses = localExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+      setAnalyticsData({ ...res.data, total_expenses: totalExpenses, net_profit: res.data.gross_profit - totalExpenses });
+    } catch (e) { showNotification('Error fetching analytics', 'error'); }
+  };
+
+  // ── Thermal Print ──────────────────────────────────────────────────────
+  const printThermal = (bill) => {
+    const w = parseInt(thermalWidth);
+    const font = parseInt(thermalFont);
+    const shopName = settings.shop_name || 'My Shop';
+    const sep = '-'.repeat(w === 58 ? 32 : 48);
+    const win = window.open('', '_blank', 'width=400,height=700');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <title>Receipt</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family: 'Courier New', monospace; font-size:${font}px; width:${w}mm; padding:4mm; }
+      .center { text-align:center; }
+      .bold { font-weight:bold; }
+      .right { text-align:right; }
+      .flex { display:flex; justify-content:space-between; }
+      .sep { border-top:1px dashed #000; margin:4px 0; }
+      .big { font-size:${font + 2}px; font-weight:bold; }
+      @media print { @page { margin:0; size:${w}mm auto; } body { padding:2mm; } }
+    </style></head><body>
+    <div class="center bold big">${shopName}</div>
+    ${settings.gstin ? `<div class="center">GSTIN: ${settings.gstin}</div>` : ''}
+    ${settings.address ? `<div class="center">${settings.address}</div>` : ''}
+    ${settings.phone ? `<div class="center">Ph: ${settings.phone}</div>` : ''}
+    <div class="sep"></div>
+    <div class="flex"><span>Invoice: ${bill.invoice_no}</span></div>
+    <div class="flex"><span>Date: ${new Date(bill.created_at).toLocaleString()}</span></div>
+    ${bill.customer_name ? `<div>Customer: ${bill.customer_name}</div>` : ''}
+    ${bill.customer_phone ? `<div>Phone: ${bill.customer_phone}</div>` : ''}
+    <div class="sep"></div>
+    ${bill.items.map(i => `
+      <div class="bold">${i.name}</div>
+      <div class="flex"><span>  ${i.quantity} x ₹${i.price.toFixed(2)}</span><span>₹${(i.price*i.quantity).toFixed(2)}</span></div>
+    `).join('')}
+    <div class="sep"></div>
+    <div class="flex"><span>Subtotal</span><span>₹${bill.subtotal.toFixed(2)}</span></div>
+    ${bill.discount_amount > 0 ? `<div class="flex"><span>Discount (${bill.discount_percent}%)</span><span>-₹${bill.discount_amount.toFixed(2)}</span></div>` : ''}
+    ${bill.tax_amount > 0 ? `<div class="flex"><span>GST (${bill.tax_percent}%)</span><span>₹${bill.tax_amount.toFixed(2)}</span></div>` : ''}
+    <div class="sep"></div>
+    <div class="flex big"><span>TOTAL</span><span>₹${bill.total.toFixed(2)}</span></div>
+    ${bill.balance_amount > 0 ? `<div class="flex" style="color:red"><span>Balance Due</span><span>₹${bill.balance_amount.toFixed(2)}</span></div>` : ''}
+    <div class="flex"><span>Payment: ${bill.payment_method}</span>${bill.cash_received > 0 ? `<span>Cash: ₹${bill.cash_received.toFixed(2)}</span>` : ''}</div>
+    ${bill.change_given > 0 ? `<div class="flex"><span>Change</span><span>₹${bill.change_given.toFixed(2)}</span></div>` : ''}
+    <div class="sep"></div>
+    <div class="center">Thank you! Visit again.</div>
+    <div class="center" style="font-size:10px">Powered by SS Technologies</div>
+    <br/><br/>
+    </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); win.onafterprint = () => win.close(); };
+  };
+
+  // ── WhatsApp Auto-Send ─────────────────────────────────────────────────
+  const sendBillWhatsAppAuto = (bill) => {
+    if (!bill.customer_phone) { showNotification('No customer phone number', 'error'); return; }
+    sendBillViaWhatsApp(bill);
+    showNotification('Opening WhatsApp...', 'success');
+  };
+
+  // ── Barcode Labels ─────────────────────────────────────────────────────
+  const printBarcodeLabels = () => {
+    const selected = barcodeProducts.filter(p => barcodeQty[p.id] > 0);
+    if (selected.length === 0) { showNotification('Select at least one product', 'error'); return; }
+    const sizes = { small: { w: '40mm', h: '25mm', font: 10 }, medium: { w: '60mm', h: '35mm', font: 12 }, large: { w: '80mm', h: '50mm', font: 14 } };
+    const s = sizes[labelSize];
+    let labels = '';
+    for (const p of selected) {
+      const qty = barcodeQty[p.id] || 1;
+      for (let i = 0; i < qty; i++) {
+        labels += `<div class="label">
+          <div class="shop">${settings.shop_name || 'Shop'}</div>
+          <div class="name">${p.name}</div>
+          <div class="price">₹${p.price.toFixed(2)}</div>
+          <div class="barcode">||||| ${p.barcode} |||||</div>
+          <div class="barcode-text">${p.barcode}</div>
+          ${p.hsn_code ? `<div class="hsn">HSN: ${p.hsn_code}</div>` : ''}
+        </div>`;
+      }
+    }
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Barcode Labels</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family: Arial, sans-serif; background: white; }
+      .labels { display:flex; flex-wrap:wrap; gap:2mm; padding:5mm; }
+      .label { width:${s.w}; height:${s.h}; border:1px solid #000; padding:2mm; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; overflow:hidden; }
+      .shop { font-size:${s.font - 2}px; color:#555; }
+      .name { font-size:${s.font}px; font-weight:bold; }
+      .price { font-size:${s.font + 2}px; font-weight:bold; color:#000; }
+      .barcode { font-size:${s.font + 6}px; letter-spacing:2px; font-family:monospace; }
+      .barcode-text { font-size:${s.font - 1}px; font-family:monospace; letter-spacing:3px; }
+      .hsn { font-size:${s.font - 3}px; color:#777; }
+      @media print { @page { margin:5mm; } body { } }
+    </style></head><body>
+    <div class="labels">${labels}</div>
+    </body></html>`);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); };
   };
 
   const sendBillViaWhatsApp = (bill) => {
@@ -994,6 +1414,12 @@ const BillingPOS = () => {
             { id: VIEWS.DAY_CLOSE, icon: '🔒', label: 'Day Close' },
             { id: VIEWS.RETURNS, icon: '↩️', label: 'Returns' },
             { id: VIEWS.EXPENSES, icon: '💸', label: 'Expenses' },
+            { id: VIEWS.ANALYTICS, icon: '📈', label: 'P&L Analytics' },
+            { id: VIEWS.SUPPLIERS, icon: '🏭', label: 'Suppliers' },
+            { id: VIEWS.PURCHASE_ORDERS, icon: '📥', label: 'Purchase Orders' },
+            { id: VIEWS.BRANCHES, icon: '🏢', label: 'Branches & Users' },
+            { id: VIEWS.LOYALTY, icon: '⭐', label: 'Loyalty Points' },
+            { id: VIEWS.BARCODE_LABELS, icon: '🏷️', label: 'Barcode Labels' },
             { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
           ].map(item => (
             <div
@@ -1265,6 +1691,28 @@ const BillingPOS = () => {
                       );
                     })()}
                   </div>
+
+                  {/* Loyalty Points Section */}
+                  {loyaltyInfo && loyaltySettings.enabled && (
+                    <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)' }}>
+                      <div className="section-label" style={{ color: 'var(--accent)' }}>⭐ Loyalty Points: {loyaltyInfo.points} pts</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                        Min redeem: {loyaltySettings.min_redeem_points} pts | 1 pt = ₹{loyaltySettings.rupees_per_point}
+                      </div>
+                      {loyaltyDiscount > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ color: 'var(--success)' }}>✓ ₹{loyaltyDiscount.toFixed(2)} discount applied ({redeemPoints} pts)</span>
+                          <button className="btn btn-sm" style={{ padding: '2px 8px' }} onClick={() => { setLoyaltyDiscount(0); setRedeemPoints(''); }}>✕</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input className="input" placeholder="Points to redeem" type="number" style={{ flex: 1 }}
+                            value={redeemPoints} onChange={e => setRedeemPoints(e.target.value)} />
+                          <button className="btn btn-sm btn-primary" onClick={handleRedeemLoyalty}>Redeem</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="payment-section">
                     <div className="section-label">Payment Method:</div>
@@ -1619,6 +2067,22 @@ const BillingPOS = () => {
                         >
                           📄 PDF
                         </button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => printThermal(bill)}
+                          title="Thermal Print"
+                        >
+                          🖨️
+                        </button>
+                        {bill.customer_phone && (
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => sendBillWhatsAppAuto(bill)}
+                            title="Send via WhatsApp"
+                          >
+                            📱
+                          </button>
+                        )}
                       </div>
                       </td>
                     </tr>
@@ -3039,6 +3503,469 @@ const BillingPOS = () => {
               <button className="btn" onClick={() => window.print()}>Print</button>
               {showQuotation.status === 'pending' && <button className="btn btn-primary" onClick={() => { handleConvertQuotation(showQuotation); setShowQuotation(null); }}>→ Convert to Bill</button>}
               <button className="btn" onClick={() => setShowQuotation(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════ ANALYTICS / P&L VIEW ═══════════════ */}
+      {view === VIEWS.ANALYTICS && (
+        <div className="content-view">
+          <div className="view-header">
+            <h2 className="section-title">📈 Profit & Loss Analytics</h2>
+            <button className="btn btn-primary" onClick={fetchAnalytics}>Refresh</button>
+          </div>
+          <div className="filters-bar">
+            <div className="period-filters">
+              {['today','week','month','year','all'].map(p => (
+                <button key={p} className={`btn ${analyticsPeriod === p && !analyticsStart ? 'active' : ''}`}
+                  onClick={() => { setAnalyticsPeriod(p); setAnalyticsStart(''); setAnalyticsEnd(''); }}>
+                  {p === 'today' ? 'Today' : p === 'week' ? 'Week' : p === 'month' ? 'Month' : p === 'year' ? 'Year' : 'All'}
+                </button>
+              ))}
+            </div>
+            <div className="date-range">
+              <input className="input date-input" type="date" value={analyticsStart} onChange={e => setAnalyticsStart(e.target.value)} />
+              <span>to</span>
+              <input className="input date-input" type="date" value={analyticsEnd} onChange={e => setAnalyticsEnd(e.target.value)} />
+            </div>
+          </div>
+          {analyticsData && (
+            <>
+              <div className="stats-grid">
+                <div className="stat-card"><div className="stat-label">Total Revenue</div><div className="stat-value amount-text">{formatCurrency(analyticsData.total_revenue)}</div></div>
+                <div className="stat-card"><div className="stat-label">Cost of Goods (COGS)</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_cogs)}</div></div>
+                <div className="stat-card"><div className="stat-label">Gross Profit</div><div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(analyticsData.gross_profit)}</div></div>
+                <div className="stat-card"><div className="stat-label">Gross Margin</div><div className="stat-value">{analyticsData.gross_margin_percent}%</div></div>
+                <div className="stat-card"><div className="stat-label">Expenses</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_expenses)}</div></div>
+                <div className="stat-card"><div className="stat-label">Net Profit</div><div className="stat-value" style={{ color: analyticsData.net_profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatCurrency(analyticsData.net_profit)}</div></div>
+                <div className="stat-card"><div className="stat-label">Total Bills</div><div className="stat-value">{analyticsData.total_bills}</div></div>
+                <div className="stat-card"><div className="stat-label">Avg Bill Value</div><div className="stat-value">{formatCurrency(analyticsData.avg_bill_value)}</div></div>
+              </div>
+              <div className="report-cards">
+                <div className="card">
+                  <h3 className="card-title">Tax & Discounts</h3>
+                  <div className="report-item"><span>Tax Collected (GST)</span><span className="report-value amount-text">{formatCurrency(analyticsData.total_tax_collected)}</span></div>
+                  <div className="report-item"><span>Discounts Given</span><span className="report-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_discounts)}</span></div>
+                </div>
+                <div className="card">
+                  <h3 className="card-title">Top 10 Revenue Items</h3>
+                  {(analyticsData.top_items || []).map((item, i) => (
+                    <div key={i} className="report-item"><span>{item.name}</span><span className="report-value amount-text">{formatCurrency(item.revenue)}</span></div>
+                  ))}
+                </div>
+              </div>
+              {analyticsData.daily_trend && analyticsData.daily_trend.length > 0 && (
+                <div className="card" style={{ marginTop: 16 }}>
+                  <h3 className="card-title">Daily Revenue Trend</h3>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table">
+                      <thead><tr><th>Date</th><th>Revenue</th></tr></thead>
+                      <tbody>
+                        {analyticsData.daily_trend.slice(-30).map((d, i) => (
+                          <tr key={i}><td>{d.date}</td><td className="amount-text">{formatCurrency(d.revenue)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {!analyticsData && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading analytics...</div>}
+        </div>
+      )}
+
+      {/* ═══════════════ SUPPLIERS VIEW ═══════════════ */}
+      {view === VIEWS.SUPPLIERS && (
+        <div className="content-view">
+          <div className="view-header"><h2 className="section-title">🏭 Supplier Management</h2></div>
+          <div className="report-cards">
+            <div className="card">
+              <h3 className="card-title">{editSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
+              {[['name','Name *'],['phone','Phone'],['email','Email'],['contact_person','Contact Person'],['gstin','GSTIN'],['address','Address']].map(([k,l]) => (
+                <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
+                  value={editSupplier ? editSupplier[k] || '' : supplierForm[k] || ''}
+                  onChange={e => editSupplier ? setEditSupplier({ ...editSupplier, [k]: e.target.value }) : setSupplierForm({ ...supplierForm, [k]: e.target.value })} />
+              ))}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={handleSaveSupplier}>{editSupplier ? 'Update' : 'Add Supplier'}</button>
+                {editSupplier && <button className="btn" onClick={() => setEditSupplier(null)}>Cancel</button>}
+              </div>
+            </div>
+            <div className="card" style={{ flex: 2 }}>
+              <h3 className="card-title">Suppliers ({suppliers.length})</h3>
+              <input className="input" placeholder="Search suppliers..." value={supplierSearch}
+                onChange={e => setSupplierSearch(e.target.value)} style={{ marginBottom: 12 }} />
+              <div className="table-container">
+                <table className="data-table">
+                  <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Contact</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {suppliers.filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || s.phone.includes(supplierSearch)).map(s => (
+                      <tr key={s.id}>
+                        <td><strong>{s.name}</strong><br/><span className="sub-text">{s.email}</span></td>
+                        <td>{s.phone}</td>
+                        <td>{s.gstin || '-'}</td>
+                        <td>{s.contact_person || '-'}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-sm" onClick={() => setEditSupplier({ ...s })}>✏️</button>
+                            <button className="btn btn-sm btn-danger" onClick={() => handleDeleteSupplier(s.id)}>🗑️</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════ PURCHASE ORDERS VIEW ═══════════════ */}
+      {view === VIEWS.PURCHASE_ORDERS && (
+        <div className="content-view">
+          <div className="view-header">
+            <h2 className="section-title">📥 Purchase Orders</h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['all','pending','received','cancelled'].map(f => (
+                <button key={f} className={`btn btn-sm ${poFilter === f ? 'active' : ''}`}
+                  onClick={() => { setPoFilter(f); fetchPurchaseOrders(); }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
+              ))}
+              <button className="btn btn-primary" onClick={() => setPoView(poView === 'create' ? 'list' : 'create')}>
+                {poView === 'create' ? '← Back to List' : '+ New PO'}
+              </button>
+            </div>
+          </div>
+
+          {poView === 'create' ? (
+            <div className="report-cards">
+              <div className="card">
+                <h3 className="card-title">New Purchase Order</h3>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Supplier *</label>
+                  <select className="input" value={poForm.supplier_id}
+                    onChange={e => { const s = suppliers.find(x => x.id === e.target.value); setPoForm({ ...poForm, supplier_id: e.target.value, supplier_name: s?.name || '' }); }}>
+                    <option value="">Select Supplier</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}><label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expected Date</label>
+                    <input type="date" className="input" value={poForm.expected_date} onChange={e => setPoForm({ ...poForm, expected_date: e.target.value })} /></div>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Notes</label>
+                  <input className="input" placeholder="Notes..." value={poForm.notes} onChange={e => setPoForm({ ...poForm, notes: e.target.value })} />
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Search Products</label>
+                  <input className="input" placeholder="Search products to add..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
+                  <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
+                    {products.filter(p => !poProductSearch || p.name.toLowerCase().includes(poProductSearch.toLowerCase())).slice(0, 10).map(p => (
+                      <div key={p.id} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                        onClick={() => addPoItem(p)}>
+                        <span>{p.name}</span><span className="sub-text">Stock: {p.stock} | ₹{p.price}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <h4 style={{ margin: '12px 0 8px' }}>Items ({poForm.items.length})</h4>
+                {poForm.items.map(item => (
+                  <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 6 }}>
+                    <span style={{ flex: 2 }}>{item.product_name}</span>
+                    <input type="number" className="input" style={{ width: 70 }} placeholder="Qty" value={item.quantity} onChange={e => updatePoItem(item.product_id, 'quantity', e.target.value)} />
+                    <input type="number" className="input" style={{ width: 90 }} placeholder="Unit Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
+                    <span style={{ minWidth: 70 }} className="amount-text">₹{item.total_cost.toFixed(2)}</span>
+                    <button className="btn btn-sm btn-danger" onClick={() => removePoItem(item.product_id)}>✕</button>
+                  </div>
+                ))}
+                {poForm.items.length > 0 && (
+                  <div style={{ textAlign: 'right', marginTop: 8, fontSize: 16, fontWeight: 'bold' }}>
+                    Total: ₹{poForm.items.reduce((s, i) => s + i.total_cost, 0).toFixed(2)}
+                  </div>
+                )}
+                <button className="btn btn-primary" style={{ marginTop: 16, width: '100%' }} onClick={handleCreatePO}>Create Purchase Order</button>
+              </div>
+            </div>
+          ) : (
+            <div className="table-container">
+              <table className="data-table">
+                <thead><tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {purchaseOrders.map(po => (
+                    <tr key={po.id}>
+                      <td className="invoice-no">{po.po_number}</td>
+                      <td>{po.supplier_name}</td>
+                      <td>{po.items.length} items</td>
+                      <td className="amount-text">{formatCurrency(po.total)}</td>
+                      <td><span className={`tag ${po.status === 'received' ? 'tag-success' : po.status === 'cancelled' ? 'tag-danger' : ''}`}>{po.status}</span></td>
+                      <td>{new Date(po.created_at).toLocaleDateString()}</td>
+                      <td>
+                        <div className="table-actions">
+                          {po.status === 'pending' && <>
+                            <button className="btn btn-sm btn-primary" onClick={() => handleReceivePO(po.id)}>✓ Receive</button>
+                            <button className="btn btn-sm" onClick={() => handleCancelPO(po.id)}>Cancel</button>
+                          </>}
+                          {po.status !== 'pending' && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{po.received_date ? `Received: ${new Date(po.received_date).toLocaleDateString()}` : po.status}</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {purchaseOrders.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>No purchase orders found</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ BRANCHES & USERS VIEW ═══════════════ */}
+      {view === VIEWS.BRANCHES && (
+        <div className="content-view">
+          <div className="view-header">
+            <h2 className="section-title">🏢 Branches & Users</h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className={`btn ${multibranchTab === 'branches' ? 'active' : ''}`} onClick={() => setMultibranchTab('branches')}>🏢 Branches</button>
+              <button className={`btn ${multibranchTab === 'users' ? 'active' : ''}`} onClick={() => setMultibranchTab('users')}>👤 Users</button>
+              {currentUser ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', background: 'var(--bg-tertiary)', borderRadius: 6 }}>
+                  <span style={{ fontSize: 12 }}>👤 {currentUser.name} ({currentUser.role})</span>
+                  <button className="btn btn-sm" onClick={handleLogout}>Logout</button>
+                </div>
+              ) : (
+                <button className="btn btn-primary" onClick={() => setShowLoginModal(true)}>🔐 Login</button>
+              )}
+            </div>
+          </div>
+
+          {multibranchTab === 'branches' ? (
+            <div className="report-cards">
+              <div className="card">
+                <h3 className="card-title">{editBranch ? 'Edit Branch' : 'Add Branch'}</h3>
+                {[['name','Branch Name *'],['address','Address'],['phone','Phone'],['gstin','GSTIN']].map(([k,l]) => (
+                  <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
+                    value={editBranch ? editBranch[k] || '' : branchForm[k] || ''}
+                    onChange={e => editBranch ? setEditBranch({ ...editBranch, [k]: e.target.value }) : setBranchForm({ ...branchForm, [k]: e.target.value })} />
+                ))}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={handleSaveBranch}>{editBranch ? 'Update' : 'Add Branch'}</button>
+                  {editBranch && <button className="btn" onClick={() => setEditBranch(null)}>Cancel</button>}
+                </div>
+              </div>
+              <div className="card" style={{ flex: 2 }}>
+                <h3 className="card-title">Branches ({branches.length})</h3>
+                {branches.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No branches added yet</div> : (
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        {branches.map(b => (
+                          <tr key={b.id}>
+                            <td><strong>{b.name}</strong><br/><span className="sub-text">{b.address}</span></td>
+                            <td>{b.phone}</td><td>{b.gstin || '-'}</td>
+                            <td><div className="table-actions">
+                              <button className="btn btn-sm" onClick={() => setEditBranch({ ...b })}>✏️</button>
+                              <button className="btn btn-sm btn-danger" onClick={() => handleDeleteBranch(b.id)}>🗑️</button>
+                            </div></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="report-cards">
+              <div className="card">
+                <h3 className="card-title">{editUser ? 'Edit User' : 'Add User'}</h3>
+                {[['name','Full Name *'],['username','Username *'],['pin','4-digit PIN *']].map(([k,l]) => (
+                  <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l} type={k === 'pin' ? 'password' : 'text'} maxLength={k === 'pin' ? 4 : undefined}
+                    value={editUser ? editUser[k] || '' : userForm[k] || ''}
+                    onChange={e => editUser ? setEditUser({ ...editUser, [k]: e.target.value }) : setUserForm({ ...userForm, [k]: e.target.value })} />
+                ))}
+                <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.role : userForm.role}
+                  onChange={e => editUser ? setEditUser({ ...editUser, role: e.target.value }) : setUserForm({ ...userForm, role: e.target.value })}>
+                  <option value="cashier">Cashier</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.branch_id : userForm.branch_id}
+                  onChange={e => { const br = branches.find(b => b.id === e.target.value); editUser ? setEditUser({ ...editUser, branch_id: e.target.value, branch_name: br?.name||'' }) : setUserForm({ ...userForm, branch_id: e.target.value, branch_name: br?.name||'' }); }}>
+                  <option value="">No Branch</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={handleSaveUser}>{editUser ? 'Update' : 'Add User'}</button>
+                  {editUser && <button className="btn" onClick={() => setEditUser(null)}>Cancel</button>}
+                </div>
+              </div>
+              <div className="card" style={{ flex: 2 }}>
+                <h3 className="card-title">Users ({appUsers.length})</h3>
+                {appUsers.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No users added yet</div> : (
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        {appUsers.map(u => (
+                          <tr key={u.id}>
+                            <td>{u.name}</td><td>{u.username}</td>
+                            <td><span className="tag">{u.role}</span></td>
+                            <td>{u.branch_name || '-'}</td>
+                            <td><div className="table-actions">
+                              <button className="btn btn-sm" onClick={() => setEditUser({ ...u })}>✏️</button>
+                              <button className="btn btn-sm btn-danger" onClick={() => handleDeleteUser(u.id)}>🗑️</button>
+                            </div></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ LOYALTY POINTS VIEW ═══════════════ */}
+      {view === VIEWS.LOYALTY && (
+        <div className="content-view">
+          <div className="view-header"><h2 className="section-title">⭐ Loyalty Points Program</h2></div>
+          <div className="report-cards">
+            <div className="card">
+              <h3 className="card-title">Program Settings</h3>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={loyaltySettings.enabled} onChange={e => setLoyaltySettings({ ...loyaltySettings, enabled: e.target.checked })} />
+                  <span>Enable Loyalty Program</span>
+                </label>
+              </div>
+              {[
+                ['points_per_rupee', 'Points earned per ₹1 spent', 'number'],
+                ['rupees_per_point', '₹ value of 1 point on redemption', 'number'],
+                ['min_redeem_points', 'Minimum points to redeem', 'number'],
+                ['expiry_days', 'Points expiry (days)', 'number'],
+              ].map(([k, l, t]) => (
+                <div key={k} style={{ marginBottom: 10 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{l}</label>
+                  <input className="input" type={t} value={loyaltySettings[k]}
+                    onChange={e => setLoyaltySettings({ ...loyaltySettings, [k]: parseFloat(e.target.value) || 0 })} />
+                </div>
+              ))}
+              <div style={{ background: 'var(--bg-tertiary)', borderRadius: 6, padding: 12, marginBottom: 12, fontSize: 13 }}>
+                <strong>How it works:</strong><br/>
+                Customer earns <strong>{loyaltySettings.points_per_rupee} pt</strong> per ₹1 spent.<br/>
+                Minimum <strong>{loyaltySettings.min_redeem_points} pts</strong> needed to redeem.<br/>
+                1 point = ₹<strong>{loyaltySettings.rupees_per_point}</strong> discount.
+              </div>
+              <button className="btn btn-primary" onClick={handleSaveLoyaltySettings}>Save Settings</button>
+            </div>
+            <div className="card" style={{ flex: 2 }}>
+              <h3 className="card-title">Customer Points Lookup</h3>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input className="input" placeholder="Enter customer phone..." id="loyalty-phone-input" />
+                <button className="btn btn-primary" onClick={() => {
+                  const phone = document.getElementById('loyalty-phone-input').value.trim();
+                  if (phone) fetchLoyaltyInfo(phone);
+                }}>Lookup</button>
+              </div>
+              {loyaltyInfo && (
+                <div>
+                  <div style={{ fontSize: 24, fontWeight: 'bold', color: 'var(--accent)', marginBottom: 8 }}>
+                    ⭐ {loyaltyInfo.points} Points
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+                    Redeemable value: ₹{(loyaltyInfo.points * loyaltySettings.rupees_per_point).toFixed(2)}
+                  </div>
+                  <h4 style={{ marginBottom: 8 }}>Recent Transactions</h4>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Type</th><th>Points</th><th>Reference</th><th>Date</th></tr></thead>
+                      <tbody>
+                        {(loyaltyInfo.transactions || []).map((t, i) => (
+                          <tr key={i}>
+                            <td><span className={`tag ${t.type === 'earned' ? 'tag-success' : 'tag-danger'}`}>{t.type}</span></td>
+                            <td style={{ color: t.points > 0 ? 'var(--success)' : 'var(--danger)' }}>{t.points > 0 ? '+' : ''}{t.points}</td>
+                            <td>{t.reference}</td>
+                            <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                        {loyaltyInfo.transactions?.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No transactions</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════ BARCODE LABELS VIEW ═══════════════ */}
+      {view === VIEWS.BARCODE_LABELS && (
+        <div className="content-view">
+          <div className="view-header">
+            <h2 className="section-title">🏷️ Barcode Label Printing</h2>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 13 }}>Label size:</span>
+              {['small','medium','large'].map(s => (
+                <button key={s} className={`btn btn-sm ${labelSize === s ? 'active' : ''}`} onClick={() => setLabelSize(s)}>
+                  {s === 'small' ? '40×25mm' : s === 'medium' ? '60×35mm' : '80×50mm'}
+                </button>
+              ))}
+              <button className="btn btn-primary" onClick={printBarcodeLabels}>🖨️ Print Labels</button>
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <input className="input" placeholder="Search products..." value={barcodeSearch}
+              onChange={e => { setBarcodeSearchState(e.target.value); setBarcodeProducts(products.filter(p => !e.target.value || p.name.toLowerCase().includes(e.target.value.toLowerCase()) || p.barcode.includes(e.target.value))); }} />
+          </div>
+          <div style={{ marginBottom: 10, display: 'flex', gap: 10 }}>
+            <button className="btn btn-sm" onClick={() => { const q = {}; barcodeProducts.forEach(p => q[p.id] = 1); setBarcodeQty(q); }}>Select All</button>
+            <button className="btn btn-sm" onClick={() => setBarcodeQty({})}>Clear All</button>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
+              {Object.values(barcodeQty).reduce((s, v) => s + (v || 0), 0)} labels to print
+            </span>
+          </div>
+          <div className="table-container">
+            <table className="data-table">
+              <thead><tr><th>Product</th><th>Barcode</th><th>Price</th><th>Category</th><th># Labels</th></tr></thead>
+              <tbody>
+                {barcodeProducts.map(p => (
+                  <tr key={p.id}>
+                    <td>{p.name}</td>
+                    <td style={{ fontFamily: 'monospace', letterSpacing: 2 }}>{p.barcode}</td>
+                    <td className="amount-text">₹{p.price}</td>
+                    <td>{p.category}</td>
+                    <td style={{ width: 100 }}>
+                      <input type="number" className="input" style={{ width: 80 }} min={0} max={100}
+                        value={barcodeQty[p.id] || 0}
+                        onChange={e => setBarcodeQty({ ...barcodeQty, [p.id]: parseInt(e.target.value) || 0 })} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════ LOGIN MODAL ═══════════════ */}
+      {showLoginModal && (
+        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+            <h3 style={{ marginBottom: 16 }}>🔐 Staff Login</h3>
+            <input className="input" placeholder="Username" style={{ marginBottom: 8 }}
+              value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} />
+            <input className="input" type="password" placeholder="4-digit PIN" maxLength={4} style={{ marginBottom: 16 }}
+              value={loginForm.pin} onChange={e => setLoginForm({ ...loginForm, pin: e.target.value })}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+            <div className="modal-actions">
+              <button className="btn btn-primary" onClick={handleLogin}>Login</button>
+              <button className="btn" onClick={() => setShowLoginModal(false)}>Cancel</button>
             </div>
           </div>
         </div>
