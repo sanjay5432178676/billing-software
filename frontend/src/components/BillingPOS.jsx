@@ -21,8 +21,12 @@ const VIEWS = {
   DAY_CLOSE: 'day_close',
   STOCK_ADJUSTMENTS: 'stock_adjustments',
   QUOTATIONS: 'quotations',
+  RETURNS: 'returns',
+  EXPENSES: 'expenses',
   SETTINGS: 'settings'
 };
+
+const TAX_RATES = [0, 5, 12, 18, 28];
 
 const BillingPOS = () => {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
@@ -101,6 +105,20 @@ const BillingPOS = () => {
   // Dashboard state
   const [dashData, setDashData] = useState(null);
 
+  // Returns state
+  const [returnBillNo, setReturnBillNo] = useState('');
+  const [returnBill, setReturnBill] = useState(null);
+  const [returnItems, setReturnItems] = useState([]);
+  const [returnReason, setReturnReason] = useState('');
+  const [returnLoading, setReturnLoading] = useState(false);
+  const [returns, setReturns] = useState(() => JSON.parse(localStorage.getItem('pos_returns') || '[]'));
+
+  // Expenses state
+  const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('pos_expenses') || '[]'));
+  const [expenseForm, setExpenseForm] = useState({ category: 'Rent', amount: '', description: '', date: new Date().toISOString().slice(0,10) });
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const EXPENSE_CATEGORIES = ['Rent', 'Electricity', 'Salary', 'Purchase', 'Transport', 'Maintenance', 'Other'];
+
   const barcodeRef = useRef(null);
 
   useEffect(() => {
@@ -150,6 +168,28 @@ const BillingPOS = () => {
       fetchBills();
     }
   }, [view, billSearch, billStartDate, billEndDate]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      switch(e.key) {
+        case 'F1': e.preventDefault(); setView(VIEWS.DASHBOARD); break;
+        case 'F2': e.preventDefault(); setView(VIEWS.POS); break;
+        case 'F3': e.preventDefault(); setView(VIEWS.BILLS); break;
+        case 'F4': e.preventDefault(); setView(VIEWS.INVENTORY); break;
+        case 'F5': e.preventDefault(); setView(VIEWS.CUSTOMERS); break;
+        case 'F6': e.preventDefault(); setView(VIEWS.QUOTATIONS); break;
+        case 'F7': e.preventDefault(); setView(VIEWS.RETURNS); break;
+        case 'F8': e.preventDefault(); setView(VIEWS.EXPENSES); break;
+        case 'F9': e.preventDefault(); setView(VIEWS.REPORTS); break;
+        case 'Escape': setShowReceipt(null); setEditProduct(null); setCustomerHistory(null); setEditingCustomer(null); break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
 
   useEffect(() => {
     if (view === VIEWS.CUSTOMERS) {
@@ -383,6 +423,132 @@ const BillingPOS = () => {
     } catch (error) {
       showNotification('Error deleting quotation', 'error');
     }
+  };
+
+  // ── PDF Download ──────────────────────────────────────────────────
+  const downloadBillPDF = (bill) => {
+    const win = window.open('', '_blank');
+    const shopName = (typeof settings !== 'undefined' && settings.shop_name) ? settings.shop_name : 'Shop';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice ${bill.invoice_no}</title>
+    <style>
+      body{font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;font-size:13px;}
+      h2{text-align:center;margin:0 0 4px;}
+      .center{text-align:center;} .bold{font-weight:bold;}
+      table{width:100%;border-collapse:collapse;margin:12px 0;}
+      th,td{padding:6px 4px;border-bottom:1px solid #eee;text-align:left;}
+      th{background:#f5f5f5;}
+      .total-row{font-weight:bold;font-size:15px;}
+      .divider{border-top:1px dashed #999;margin:10px 0;}
+      .right{text-align:right;}
+      @media print{body{max-width:100%;}}
+    </style></head><body>
+    <h2>${shopName}</h2>
+    <div class="center">${settings.gstin ? 'GSTIN: ' + settings.gstin + '<br/>' : ''}${settings.address || ''}<br/>${settings.phone ? 'Ph: ' + settings.phone : ''}</div>
+    <div class="divider"></div>
+    <div><span class="bold">Invoice:</span> ${bill.invoice_no}</div>
+    <div><span class="bold">Date:</span> ${new Date(bill.created_at).toLocaleString()}</div>
+    ${bill.customer_name ? '<div><span class="bold">Customer:</span> ' + bill.customer_name + '</div>' : ''}
+    ${bill.customer_phone ? '<div><span class="bold">Phone:</span> ' + bill.customer_phone + '</div>' : ''}
+    <div class="divider"></div>
+    <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th class="right">Amt</th></tr></thead>
+    <tbody>${bill.items.map(i => `<tr><td>${i.name}${i.hsn_code ? '<br/><small>HSN: ' + i.hsn_code + '</small>' : ''}</td><td>${i.quantity}</td><td>₹${i.price.toFixed(2)}</td><td class="right">₹${(i.price * i.quantity).toFixed(2)}</td></tr>`).join('')}</tbody></table>
+    <div class="divider"></div>
+    <table>
+      <tr><td>Subtotal</td><td class="right">₹${bill.subtotal.toFixed(2)}</td></tr>
+      ${bill.discount_amount > 0 ? '<tr><td>Discount (' + bill.discount_percent + '%)</td><td class="right">- ₹' + bill.discount_amount.toFixed(2) + '</td></tr>' : ''}
+      ${bill.tax_amount > 0 ? '<tr><td>GST (' + bill.tax_percent + '%)</td><td class="right">₹' + bill.tax_amount.toFixed(2) + '</td></tr>' : ''}
+      <tr class="total-row"><td>TOTAL</td><td class="right">₹${bill.total.toFixed(2)}</td></tr>
+      ${bill.balance_amount > 0 ? '<tr><td style="color:red">Balance Due</td><td class="right" style="color:red">₹' + bill.balance_amount.toFixed(2) + '</td></tr>' : ''}
+      <tr><td>Payment</td><td class="right">${bill.payment_method}</td></tr>
+    </table>
+    <div class="divider"></div>
+    <div class="center">Thank you for your business!<br/><small>Powered by SS Technologies</small></div>
+    </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); };
+  };
+
+  // ── Returns ────────────────────────────────────────────────────────
+  const searchReturnBill = async () => {
+    if (!returnBillNo.trim()) { showNotification('Enter invoice number', 'error'); return; }
+    setReturnLoading(true);
+    try {
+      const res = await axios.get(`${API}/bills`, { params: { search: returnBillNo } });
+      const found = res.data.find(b => b.invoice_no.toLowerCase() === returnBillNo.toLowerCase());
+      if (found) {
+        setReturnBill(found);
+        setReturnItems(found.items.map(i => ({ ...i, return_qty: 0 })));
+      } else {
+        showNotification('Bill not found', 'error');
+        setReturnBill(null);
+      }
+    } catch (e) {
+      showNotification('Error searching bill', 'error');
+    } finally {
+      setReturnLoading(false);
+    }
+  };
+
+  const processReturn = async () => {
+    const itemsToReturn = returnItems.filter(i => i.return_qty > 0);
+    if (itemsToReturn.length === 0) { showNotification('Select items to return', 'error'); return; }
+    const refundAmount = itemsToReturn.reduce((s, i) => s + i.price * i.return_qty, 0);
+    const returnRecord = {
+      id: Date.now().toString(),
+      original_invoice: returnBill.invoice_no,
+      return_no: 'RET-' + Date.now(),
+      items: itemsToReturn,
+      refund_amount: refundAmount,
+      reason: returnReason,
+      customer_name: returnBill.customer_name,
+      customer_phone: returnBill.customer_phone,
+      created_at: new Date().toISOString()
+    };
+    // Restore stock
+    for (const item of itemsToReturn) {
+      await axios.post(`${API}/stock-adjustments`, {
+        product_id: item.product_id,
+        adjustment_type: 'add',
+        quantity: item.return_qty,
+        reason: `Return from ${returnBill.invoice_no}`
+      });
+    }
+    const updated = [returnRecord, ...returns];
+    setReturns(updated);
+    localStorage.setItem('pos_returns', JSON.stringify(updated));
+    showNotification(`Return processed! Refund: ₹${refundAmount.toFixed(2)}`, 'success');
+    setReturnBill(null);
+    setReturnBillNo('');
+    setReturnItems([]);
+    setReturnReason('');
+    await loadData();
+  };
+
+  // ── Expenses ───────────────────────────────────────────────────────
+  const addExpense = () => {
+    if (!expenseForm.amount || parseFloat(expenseForm.amount) <= 0) {
+      showNotification('Enter valid amount', 'error'); return;
+    }
+    const expense = { id: Date.now().toString(), ...expenseForm, amount: parseFloat(expenseForm.amount) };
+    const updated = [expense, ...expenses];
+    setExpenses(updated);
+    localStorage.setItem('pos_expenses', JSON.stringify(updated));
+    setExpenseForm({ category: 'Rent', amount: '', description: '', date: new Date().toISOString().slice(0,10) });
+    showNotification('Expense added', 'success');
+  };
+
+  const deleteExpense = (id) => {
+    const updated = expenses.filter(e => e.id !== id);
+    setExpenses(updated);
+    localStorage.setItem('pos_expenses', JSON.stringify(updated));
+    showNotification('Expense deleted', 'success');
+  };
+
+  const exportExpenses = () => {
+    const data = expenses.map(e => ({ Date: e.date, Category: e.category, Description: e.description, Amount: e.amount }));
+    exportToExcel(data, 'expenses');
+    showNotification('Expenses exported', 'success');
   };
 
   const fetchBills = async () => {
@@ -826,6 +992,8 @@ const BillingPOS = () => {
             { id: VIEWS.LOW_STOCK, icon: '⚠️', label: 'Low Stock' },
             { id: VIEWS.REPORTS, icon: '📊', label: 'Reports' },
             { id: VIEWS.DAY_CLOSE, icon: '🔒', label: 'Day Close' },
+            { id: VIEWS.RETURNS, icon: '↩️', label: 'Returns' },
+            { id: VIEWS.EXPENSES, icon: '💸', label: 'Expenses' },
             { id: VIEWS.SETTINGS, icon: '⚙️', label: 'Settings' }
           ].map(item => (
             <div
@@ -864,17 +1032,22 @@ const BillingPOS = () => {
           <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="theme-btn">
             {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? 'Light' : 'Dark'} Mode
           </button>
+          <div style={{ padding: '8px', borderTop: '1px solid var(--border)', fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.6, marginTop: 8 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 11 }}>⌨️ Shortcuts</div>
+            <div>F1 Dashboard &nbsp; F2 POS</div>
+            <div>F3 Bills &nbsp; F4 Inventory</div>
+            <div>F5 Customers &nbsp; F6 Quotations</div>
+            <div>F7 Returns &nbsp; F8 Expenses</div>
+            <div>Esc Close modal</div>
+          </div>
           <div style={{
             textAlign: 'center',
-            marginTop: '10px',
             padding: '8px',
             borderTop: '1px solid var(--border)',
             fontSize: '11px',
             color: 'var(--text-muted)',
-            lineHeight: '1.4'
           }}>
             <div style={{ fontWeight: '600', fontSize: '12px', color: 'var(--accent)' }}>SS Technologies</div>
-            <div>Powered by SS Technologies</div>
           </div>
         </div>
       </div>
@@ -1298,6 +1471,13 @@ const BillingPOS = () => {
                   value={newProduct.hsn_code}
                   onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
                 />
+                <div className="form-group">
+                  <label>GST Rate (%)</label>
+                  <select className="input" value={newProduct.tax_percent || settings.tax_percent}
+                    onChange={(e) => setNewProduct({ ...newProduct, tax_percent: parseFloat(e.target.value) })}>
+                    {TAX_RATES.map(r => <option key={r} value={r}>{r}% GST</option>)}
+                  </select>
+                </div>
               </div>
               <button data-testid="add-product-btn" className="btn btn-primary" onClick={handleAddProduct}>
                 Add Product
@@ -1425,6 +1605,7 @@ const BillingPOS = () => {
                         <span className="tag">{bill.payment_method}</span>
                       </td>
                       <td>
+                        <div className="table-actions">
                         <button
                           data-testid={`view-bill-${bill.invoice_no}`}
                           className="btn btn-sm"
@@ -1432,6 +1613,13 @@ const BillingPOS = () => {
                         >
                           View
                         </button>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => downloadBillPDF(bill)}
+                        >
+                          📄 PDF
+                        </button>
+                      </div>
                       </td>
                     </tr>
                   ))}
@@ -2174,6 +2362,201 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Returns View */}
+        {view === VIEWS.RETURNS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">↩️ Returns & Refunds</h2>
+            </div>
+
+            <div className="card add-product-card">
+              <h3 className="card-title">Process Return</h3>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                <input className="input" placeholder="Enter Invoice Number (e.g. INV-20260526-0001)"
+                  value={returnBillNo} onChange={e => setReturnBillNo(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && searchReturnBill()} />
+                <button className="btn btn-primary" onClick={searchReturnBill} disabled={returnLoading}>
+                  {returnLoading ? '⏳' : '🔍 Search'}
+                </button>
+              </div>
+
+              {returnBill && (
+                <>
+                  <div style={{ padding: '10px 14px', background: 'var(--card-bg)', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                    <strong>{returnBill.invoice_no}</strong> — {returnBill.customer_name || 'Guest'} — {new Date(returnBill.created_at).toLocaleDateString()} — Total: {formatCurrency(returnBill.total)}
+                  </div>
+
+                  <div className="table-container" style={{ marginBottom: 12 }}>
+                    <table className="data-table">
+                      <thead><tr><th>Item</th><th>Sold Qty</th><th>Return Qty</th><th>Refund</th></tr></thead>
+                      <tbody>
+                        {returnItems.map((item, idx) => (
+                          <tr key={idx}>
+                            <td>{item.name}</td>
+                            <td>{item.quantity}</td>
+                            <td>
+                              <input type="number" className="input qty-input" min="0" max={item.quantity}
+                                value={item.return_qty}
+                                onChange={e => setReturnItems(returnItems.map((i, ii) => ii === idx ? { ...i, return_qty: Math.min(parseInt(e.target.value) || 0, i.quantity) } : i))} />
+                            </td>
+                            <td className="amount-text">{formatCurrency(item.price * item.return_qty)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ marginBottom: 12, padding: '10px 14px', background: 'var(--card-bg)', borderRadius: 8, fontWeight: 600 }}>
+                    Total Refund: <span className="amount-text">{formatCurrency(returnItems.reduce((s, i) => s + i.price * i.return_qty, 0))}</span>
+                  </div>
+
+                  <input className="input" placeholder="Reason for return (e.g. Damaged, Wrong item...)"
+                    value={returnReason} onChange={e => setReturnReason(e.target.value)} style={{ marginBottom: 12 }} />
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn btn-primary" onClick={processReturn}>✅ Process Return</button>
+                    <button className="btn" onClick={() => { setReturnBill(null); setReturnBillNo(''); setReturnItems([]); }}>Cancel</button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Return History */}
+            <div className="card" style={{ marginTop: 20 }}>
+              <h3 className="card-title">Return History ({returns.length})</h3>
+              {returns.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No returns processed yet</div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead><tr><th>Return No</th><th>Original Invoice</th><th>Customer</th><th>Items</th><th>Refund</th><th>Reason</th><th>Date</th></tr></thead>
+                    <tbody>
+                      {returns.map(r => (
+                        <tr key={r.id}>
+                          <td><strong>{r.return_no}</strong></td>
+                          <td>{r.original_invoice}</td>
+                          <td>{r.customer_name || '-'}</td>
+                          <td>{r.items.length} items</td>
+                          <td className="amount-text">{formatCurrency(r.refund_amount)}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{r.reason || '-'}</td>
+                          <td>{new Date(r.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Expenses View */}
+        {view === VIEWS.EXPENSES && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">💸 Expense Tracking</h2>
+              <button className="btn btn-primary" onClick={exportExpenses}>Export Excel</button>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-label">Total Expenses</div>
+                <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(expenses.reduce((s, e) => s + e.amount, 0))}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">This Month</div>
+                <div className="stat-value" style={{ color: 'var(--warning)' }}>
+                  {formatCurrency(expenses.filter(e => e.date && e.date.slice(0,7) === new Date().toISOString().slice(0,7)).reduce((s, e) => s + e.amount, 0))}
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Today</div>
+                <div className="stat-value">
+                  {formatCurrency(expenses.filter(e => e.date === new Date().toISOString().slice(0,10)).reduce((s, e) => s + e.amount, 0))}
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Entries</div>
+                <div className="stat-value">{expenses.length}</div>
+              </div>
+            </div>
+
+            {/* Add Expense Form */}
+            <div className="card add-product-card">
+              <h3 className="card-title">Add Expense</h3>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>Category *</label>
+                  <select className="input" value={expenseForm.category} onChange={e => setExpenseForm({ ...expenseForm, category: e.target.value })}>
+                    {(typeof EXPENSE_CATEGORIES !== 'undefined' ? [] : []).concat(['Rent','Electricity','Salary','Purchase','Transport','Maintenance','Other']).filter((v,i,a)=>a.indexOf(v)===i).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Amount *</label>
+                  <input className="input" type="number" min="0" placeholder="Enter amount" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Date</label>
+                  <input className="input date-input" type="date" value={expenseForm.date} onChange={e => setExpenseForm({ ...expenseForm, date: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Description</label>
+                  <input className="input" placeholder="Details..." value={expenseForm.description} onChange={e => setExpenseForm({ ...expenseForm, description: e.target.value })} />
+                </div>
+              </div>
+              <button className="btn btn-primary" onClick={addExpense}>➕ Add Expense</button>
+            </div>
+
+            {/* Expense List */}
+            <div className="card" style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 className="card-title" style={{ margin: 0 }}>Expense History</h3>
+                <input className="input" placeholder="Search expenses..." value={expenseSearch} onChange={e => setExpenseSearch(e.target.value)} style={{ width: 220 }} />
+              </div>
+              {expenses.filter(e => !expenseSearch || e.category.toLowerCase().includes(expenseSearch.toLowerCase()) || (e.description || '').toLowerCase().includes(expenseSearch.toLowerCase())).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No expenses recorded</div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {expenses
+                        .filter(e => !expenseSearch || e.category.toLowerCase().includes(expenseSearch.toLowerCase()) || (e.description || '').toLowerCase().includes(expenseSearch.toLowerCase()))
+                        .map(e => (
+                          <tr key={e.id}>
+                            <td>{e.date}</td>
+                            <td><span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 12, background: 'var(--accent)', color: 'white' }}>{e.category}</span></td>
+                            <td style={{ color: 'var(--text-muted)' }}>{e.description || '-'}</td>
+                            <td style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatCurrency(e.amount)}</td>
+                            <td><button className="btn btn-sm btn-danger" onClick={() => deleteExpense(e.id)}>Delete</button></td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Category Breakdown */}
+            {expenses.length > 0 && (
+              <div className="card" style={{ marginTop: 20 }}>
+                <h3 className="card-title">By Category</h3>
+                {['Rent','Electricity','Salary','Purchase','Transport','Maintenance','Other'].map(cat => {
+                  const total = expenses.filter(e => e.category === cat).reduce((s, e) => s + e.amount, 0);
+                  if (total === 0) return null;
+                  return (
+                    <div key={cat} className="report-item">
+                      <span>{cat}</span>
+                      <span className="report-value" style={{ color: 'var(--danger)' }}>{formatCurrency(total)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Settings View */}
         {view === VIEWS.SETTINGS && (
           <div className="content-view">
@@ -2409,9 +2792,12 @@ const BillingPOS = () => {
 
             <div className="modal-actions">
               <button className="btn" onClick={() => window.print()} data-testid="print-receipt-btn">
-                Print
+                🖨️ Print
               </button>
-              <button className="btn btn-primary" onClick={() => setShowReceipt(null)} data-testid="close-receipt-btn">
+              <button className="btn btn-primary" onClick={() => downloadBillPDF(showReceipt)}>
+                📄 Download PDF
+              </button>
+              <button className="btn" onClick={() => setShowReceipt(null)} data-testid="close-receipt-btn">
                 Close
               </button>
             </div>
