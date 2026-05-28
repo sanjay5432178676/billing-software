@@ -366,11 +366,12 @@ const BillingPOS = () => {
   const fetchDashboard = async () => {
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const [summaryRes, dayRes, customersRes, productsRes] = await Promise.all([
+      const [summaryRes, dayRes, customersRes, productsRes, billsRes] = await Promise.all([
         axios.get(`${API}/reports/summary`, { params: { period: 'today' } }),
         axios.get(`${API}/reports/day-close`, { params: { date: today } }),
         axios.get(`${API}/customers`),
-        axios.get(`${API}/products`)
+        axios.get(`${API}/products`),
+        axios.get(`${API}/bills`)
       ]);
       setDashData({
         today: summaryRes.data,
