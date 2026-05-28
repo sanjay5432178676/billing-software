@@ -791,10 +791,8 @@ const BillingPOS = () => {
         try { await axios.post(`${API}/loyalty/earn`, null, { params: { customer_phone: earnPhone, customer_name: earnName, bill_total: effectiveTotal, invoice_no: invoiceNo } }); } catch(e) {}
       }
 
-      // WhatsApp auto-send if customer has phone
-      if (settings.auto_print && customerPhone) {
-        setTimeout(() => sendBillViaWhatsApp(res.data), 800);
-      }
+      // WhatsApp auto-send only if customer has phone (separate from auto_print)
+      // Do NOT auto-send on every bill - only manual via bill history
 
       setCart([]);
       setDiscountPercent(0);
@@ -809,7 +807,7 @@ const BillingPOS = () => {
       await loadData();
       
       if (settings.auto_print) {
-        setTimeout(() => printThermal(res.data), 500);
+        setTimeout(() => window.print(), 500);
       }
     } catch (error) {
       showNotification('Error generating bill', 'error');
@@ -1112,9 +1110,10 @@ const BillingPOS = () => {
 
   const handleRedeemLoyalty = () => {
     const pts = parseInt(redeemPoints) || 0;
-    if (!loyaltyInfo || pts <= 0) { showNotification('Enter points to redeem', 'error'); return; }
+    if (pts <= 0) { showNotification('Enter points to redeem', 'error'); return; }
+    if (!loyaltyInfo) { showNotification('Customer has no loyalty points yet', 'error'); return; }
     if (pts < loyaltySettings.min_redeem_points) { showNotification(`Minimum ${loyaltySettings.min_redeem_points} points required`, 'error'); return; }
-    if (pts > loyaltyInfo.points) { showNotification('Insufficient points', 'error'); return; }
+    if (pts > loyaltyInfo.points) { showNotification(`Only ${loyaltyInfo.points} points available`, 'error'); return; }
     const discount = pts * loyaltySettings.rupees_per_point;
     setLoyaltyDiscount(discount);
     showNotification(`₹${discount.toFixed(2)} loyalty discount applied!`, 'success');
@@ -1148,6 +1147,7 @@ const BillingPOS = () => {
     const shopName = settings.shop_name || 'My Shop';
     const sep = '-'.repeat(w === 58 ? 32 : 48);
     const win = window.open('', '_blank', 'width=400,height=700');
+    if (!win) { showNotification('Allow popups to print receipts', 'error'); return; }
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <title>Receipt</title>
     <style>
@@ -1697,9 +1697,11 @@ const BillingPOS = () => {
                   </div>
 
                   {/* Loyalty Points Section */}
-                  {loyaltyInfo && loyaltySettings.enabled && (
+                  {customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled && (
                     <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)' }}>
-                      <div className="section-label" style={{ color: 'var(--accent)' }}>⭐ Loyalty Points: {loyaltyInfo.points} pts</div>
+                      <div className="section-label" style={{ color: 'var(--accent)' }}>
+                        ⭐ Loyalty Points: {loyaltyInfo ? loyaltyInfo.points : 0} pts
+                      </div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                         Min redeem: {loyaltySettings.min_redeem_points} pts | 1 pt = ₹{loyaltySettings.rupees_per_point}
                       </div>
