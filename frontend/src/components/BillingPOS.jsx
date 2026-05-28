@@ -377,7 +377,7 @@ const BillingPOS = () => {
         dayClose: dayRes.data,
         totalCustomers: customersRes.data.length,
         totalProducts: productsRes.data.length,
-        outstandingBalance: customersRes.data.reduce((s, c) => s + (c.balance || 0), 0),
+        outstandingBalance: billsRes.data.filter(b => !b.settled && b.balance_amount > 0).reduce((s, b) => s + (b.balance_amount || 0), 0),
         lowStockCount: productsRes.data.filter(p => p.stock <= 10 && p.stock > 0).length,
         outOfStock: productsRes.data.filter(p => p.stock === 0).length,
       });
@@ -2136,7 +2136,7 @@ const BillingPOS = () => {
               <div className="stat-card">
                 <div className="stat-label">Outstanding Balance</div>
                 <div className="stat-value balance-text">
-                  {formatCurrency(customers.reduce((sum, c) => sum + (c.balance || 0), 0))}
+                  {formatCurrency(bills.filter(b => !b.settled && b.balance_amount > 0).reduce((sum, b) => sum + (b.balance_amount || 0), 0))}
                 </div>
               </div>
             </div>
@@ -2536,7 +2536,7 @@ const BillingPOS = () => {
                   </div>
                   <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.BALANCE)}>
                     <div className="stat-label">Outstanding Balance</div>
-                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(dashData.outstandingBalance || 0)}</div>
+                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(bills.filter(b => !b.settled && b.balance_amount > 0).reduce((s, b) => s + (b.balance_amount || 0), 0))}</div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>Credit due</div>
                   </div>
                   <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.CUSTOMERS)}>
