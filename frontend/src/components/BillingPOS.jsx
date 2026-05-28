@@ -733,17 +733,21 @@ const BillingPOS = () => {
     const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
     // Apply loyalty discount on top
     const effectiveTotal = Math.max(0, total - loyaltyDiscount);
-    const paid = parseFloat(customerPaid) || 0;
-    
+    // If cashier left "Amount Paid" blank → full payment, no balance stored
+    const paidEntry = customerPaid.toString().trim();
+    const paid = paidEntry === '' ? effectiveTotal : (parseFloat(paidEntry) || 0);
+
     let finalBalanceAmount = 0;
     let finalCashReceived = 0;
     let finalChangeGiven = 0;
 
-    if (paid >= effectiveTotal) {
+    if (paidEntry === '' || paid >= effectiveTotal) {
+      // Full payment or no amount entered → zero balance
       finalCashReceived = paid;
-      finalChangeGiven = paid - effectiveTotal;
+      finalChangeGiven = Math.max(0, paid - effectiveTotal);
       finalBalanceAmount = 0;
     } else {
+      // Cashier explicitly entered a partial amount → store balance
       finalCashReceived = paid;
       finalBalanceAmount = effectiveTotal - paid;
       finalChangeGiven = 0;
