@@ -3154,6 +3154,470 @@ const BillingPOS = () => {
             </div>
           </div>
         )}
+
+        {/* ═══════════════ ANALYTICS / P&L VIEW ═══════════════ */}
+        {view === VIEWS.ANALYTICS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">📈 Profit & Loss Analytics</h2>
+              <button className="btn btn-primary" onClick={fetchAnalytics}>Refresh</button>
+            </div>
+            <div className="filters-bar">
+              <div className="period-filters">
+                {['today','week','month','year','all'].map(p => (
+                  <button key={p} className={`btn ${analyticsPeriod === p && !analyticsStart ? 'active' : ''}`}
+                    onClick={() => { setAnalyticsPeriod(p); setAnalyticsStart(''); setAnalyticsEnd(''); }}>
+                    {p === 'today' ? 'Today' : p === 'week' ? 'Week' : p === 'month' ? 'Month' : p === 'year' ? 'Year' : 'All'}
+                  </button>
+                ))}
+              </div>
+              <div className="date-range">
+                <input className="input date-input" type="date" value={analyticsStart} onChange={e => setAnalyticsStart(e.target.value)} />
+                <span>to</span>
+                <input className="input date-input" type="date" value={analyticsEnd} onChange={e => setAnalyticsEnd(e.target.value)} />
+              </div>
+            </div>
+            {analyticsData && (
+              <>
+                <div className="stats-grid">
+                  <div className="stat-card"><div className="stat-label">Total Revenue</div><div className="stat-value amount-text">{formatCurrency(analyticsData.total_revenue)}</div></div>
+                  <div className="stat-card"><div className="stat-label">Cost of Goods (COGS)</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_cogs)}</div></div>
+                  <div className="stat-card"><div className="stat-label">Gross Profit</div><div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(analyticsData.gross_profit)}</div></div>
+                  <div className="stat-card"><div className="stat-label">Gross Margin</div><div className="stat-value">{analyticsData.gross_margin_percent}%</div></div>
+                  <div className="stat-card"><div className="stat-label">Expenses</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_expenses)}</div></div>
+                  <div className="stat-card"><div className="stat-label">Net Profit</div><div className="stat-value" style={{ color: analyticsData.net_profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatCurrency(analyticsData.net_profit)}</div></div>
+                  <div className="stat-card"><div className="stat-label">Total Bills</div><div className="stat-value">{analyticsData.total_bills}</div></div>
+                  <div className="stat-card"><div className="stat-label">Avg Bill Value</div><div className="stat-value">{formatCurrency(analyticsData.avg_bill_value)}</div></div>
+                </div>
+                <div className="report-cards">
+                  <div className="card">
+                    <h3 className="card-title">Tax & Discounts</h3>
+                    <div className="report-item"><span>Tax Collected (GST)</span><span className="report-value amount-text">{formatCurrency(analyticsData.total_tax_collected)}</span></div>
+                    <div className="report-item"><span>Discounts Given</span><span className="report-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_discounts)}</span></div>
+                  </div>
+                  <div className="card">
+                    <h3 className="card-title">Top 10 Revenue Items</h3>
+                    {(analyticsData.top_items || []).map((item, i) => (
+                      <div key={i} className="report-item"><span>{item.name}</span><span className="report-value amount-text">{formatCurrency(item.revenue)}</span></div>
+                    ))}
+                  </div>
+                </div>
+                {analyticsData.daily_trend && analyticsData.daily_trend.length > 0 && (
+                  <div className="card" style={{ marginTop: 16 }}>
+                    <h3 className="card-title">Daily Revenue Trend</h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="data-table">
+                        <thead><tr><th>Date</th><th>Revenue</th></tr></thead>
+                        <tbody>
+                          {analyticsData.daily_trend.slice(-30).map((d, i) => (
+                            <tr key={i}><td>{d.date}</td><td className="amount-text">{formatCurrency(d.revenue)}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {!analyticsData && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading analytics...</div>}
+          </div>
+        )}
+
+        {/* ═══════════════ SUPPLIERS VIEW ═══════════════ */}
+        {view === VIEWS.SUPPLIERS && (
+          <div className="content-view">
+            <div className="view-header"><h2 className="section-title">🏭 Supplier Management</h2></div>
+            <div className="report-cards">
+              <div className="card">
+                <h3 className="card-title">{editSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
+                {[['name','Name *'],['phone','Phone'],['email','Email'],['contact_person','Contact Person'],['gstin','GSTIN'],['address','Address']].map(([k,l]) => (
+                  <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
+                    value={editSupplier ? editSupplier[k] || '' : supplierForm[k] || ''}
+                    onChange={e => editSupplier ? setEditSupplier({ ...editSupplier, [k]: e.target.value }) : setSupplierForm({ ...supplierForm, [k]: e.target.value })} />
+                ))}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button className="btn btn-primary" onClick={handleSaveSupplier}>{editSupplier ? 'Update' : 'Add Supplier'}</button>
+                  {editSupplier && <button className="btn" onClick={() => setEditSupplier(null)}>Cancel</button>}
+                </div>
+              </div>
+              <div className="card" style={{ flex: 2 }}>
+                <h3 className="card-title">Suppliers ({suppliers.length})</h3>
+                <input className="input" placeholder="Search suppliers..." value={supplierSearch}
+                  onChange={e => setSupplierSearch(e.target.value)} style={{ marginBottom: 12 }} />
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Contact</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {suppliers.filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || s.phone.includes(supplierSearch)).map(s => (
+                        <tr key={s.id}>
+                          <td><strong>{s.name}</strong><br/><span className="sub-text">{s.email}</span></td>
+                          <td>{s.phone}</td>
+                          <td>{s.gstin || '-'}</td>
+                          <td>{s.contact_person || '-'}</td>
+                          <td>
+                            <div className="table-actions">
+                              <button className="btn btn-sm" onClick={() => setEditSupplier({ ...s })}>✏️</button>
+                              <button className="btn btn-sm btn-danger" onClick={() => handleDeleteSupplier(s.id)}>🗑️</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ PURCHASE ORDERS VIEW ═══════════════ */}
+        {view === VIEWS.PURCHASE_ORDERS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">📥 Purchase Orders</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['all','pending','received','cancelled'].map(f => (
+                  <button key={f} className={`btn btn-sm ${poFilter === f ? 'active' : ''}`}
+                    onClick={() => { setPoFilter(f); fetchPurchaseOrders(); }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
+                ))}
+                <button className="btn btn-primary" onClick={() => setPoView(poView === 'create' ? 'list' : 'create')}>
+                  {poView === 'create' ? '← Back to List' : '+ New PO'}
+                </button>
+              </div>
+            </div>
+
+            {poView === 'create' ? (
+              <div className="report-cards">
+                <div className="card">
+                  <h3 className="card-title">New Purchase Order</h3>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Supplier *</label>
+                    <select className="input" value={poForm.supplier_id}
+                      onChange={e => { const s = suppliers.find(x => x.id === e.target.value); setPoForm({ ...poForm, supplier_id: e.target.value, supplier_name: s?.name || '' }); }}>
+                      <option value="">Select Supplier</option>
+                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}><label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expected Date</label>
+                      <input type="date" className="input" value={poForm.expected_date} onChange={e => setPoForm({ ...poForm, expected_date: e.target.value })} /></div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Notes</label>
+                    <input className="input" placeholder="Notes..." value={poForm.notes} onChange={e => setPoForm({ ...poForm, notes: e.target.value })} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Search Products</label>
+                    <input className="input" placeholder="Search products to add..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
+                    <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
+                      {products.filter(p => !poProductSearch || p.name.toLowerCase().includes(poProductSearch.toLowerCase())).slice(0, 10).map(p => (
+                        <div key={p.id} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                          onClick={() => addPoItem(p)}>
+                          <span>{p.name}</span><span className="sub-text">Stock: {p.stock} | ₹{p.price}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <h4 style={{ margin: '12px 0 8px' }}>Items ({poForm.items.length})</h4>
+                  {poForm.items.map(item => (
+                    <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 6 }}>
+                      <span style={{ flex: 2 }}>{item.product_name}</span>
+                      <input type="number" className="input" style={{ width: 70 }} placeholder="Qty" value={item.quantity} onChange={e => updatePoItem(item.product_id, 'quantity', e.target.value)} />
+                      <input type="number" className="input" style={{ width: 90 }} placeholder="Unit Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
+                      <span style={{ minWidth: 70 }} className="amount-text">₹{item.total_cost.toFixed(2)}</span>
+                      <button className="btn btn-sm btn-danger" onClick={() => removePoItem(item.product_id)}>✕</button>
+                    </div>
+                  ))}
+                  {poForm.items.length > 0 && (
+                    <div style={{ textAlign: 'right', marginTop: 8, fontSize: 16, fontWeight: 'bold' }}>
+                      Total: ₹{poForm.items.reduce((s, i) => s + i.total_cost, 0).toFixed(2)}
+                    </div>
+                  )}
+                  <button className="btn btn-primary" style={{ marginTop: 16, width: '100%' }} onClick={handleCreatePO}>Create Purchase Order</button>
+                </div>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead><tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {purchaseOrders.map(po => (
+                      <tr key={po.id}>
+                        <td className="invoice-no">{po.po_number}</td>
+                        <td>{po.supplier_name}</td>
+                        <td>{po.items.length} items</td>
+                        <td className="amount-text">{formatCurrency(po.total)}</td>
+                        <td><span className={`tag ${po.status === 'received' ? 'tag-success' : po.status === 'cancelled' ? 'tag-danger' : ''}`}>{po.status}</span></td>
+                        <td>{new Date(po.created_at).toLocaleDateString()}</td>
+                        <td>
+                          <div className="table-actions">
+                            {po.status === 'pending' && <>
+                              <button className="btn btn-sm btn-primary" onClick={() => handleReceivePO(po.id)}>✓ Receive</button>
+                              <button className="btn btn-sm" onClick={() => handleCancelPO(po.id)}>Cancel</button>
+                            </>}
+                            {po.status !== 'pending' && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{po.received_date ? `Received: ${new Date(po.received_date).toLocaleDateString()}` : po.status}</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {purchaseOrders.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>No purchase orders found</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ BRANCHES & USERS VIEW ═══════════════ */}
+        {view === VIEWS.BRANCHES && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🏢 Branches & Users</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={`btn ${multibranchTab === 'branches' ? 'active' : ''}`} onClick={() => setMultibranchTab('branches')}>🏢 Branches</button>
+                <button className={`btn ${multibranchTab === 'users' ? 'active' : ''}`} onClick={() => setMultibranchTab('users')}>👤 Users</button>
+                {currentUser ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', background: 'var(--bg-tertiary)', borderRadius: 6 }}>
+                    <span style={{ fontSize: 12 }}>👤 {currentUser.name} ({currentUser.role})</span>
+                    <button className="btn btn-sm" onClick={handleLogout}>Logout</button>
+                  </div>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => setShowLoginModal(true)}>🔐 Login</button>
+                )}
+              </div>
+            </div>
+
+            {multibranchTab === 'branches' ? (
+              <div className="report-cards">
+                <div className="card">
+                  <h3 className="card-title">{editBranch ? 'Edit Branch' : 'Add Branch'}</h3>
+                  {[['name','Branch Name *'],['address','Address'],['phone','Phone'],['gstin','GSTIN']].map(([k,l]) => (
+                    <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
+                      value={editBranch ? editBranch[k] || '' : branchForm[k] || ''}
+                      onChange={e => editBranch ? setEditBranch({ ...editBranch, [k]: e.target.value }) : setBranchForm({ ...branchForm, [k]: e.target.value })} />
+                  ))}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-primary" onClick={handleSaveBranch}>{editBranch ? 'Update' : 'Add Branch'}</button>
+                    {editBranch && <button className="btn" onClick={() => setEditBranch(null)}>Cancel</button>}
+                  </div>
+                </div>
+                <div className="card" style={{ flex: 2 }}>
+                  <h3 className="card-title">Branches ({branches.length})</h3>
+                  {branches.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No branches added yet</div> : (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          {branches.map(b => (
+                            <tr key={b.id}>
+                              <td><strong>{b.name}</strong><br/><span className="sub-text">{b.address}</span></td>
+                              <td>{b.phone}</td><td>{b.gstin || '-'}</td>
+                              <td><div className="table-actions">
+                                <button className="btn btn-sm" onClick={() => setEditBranch({ ...b })}>✏️</button>
+                                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteBranch(b.id)}>🗑️</button>
+                              </div></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="report-cards">
+                <div className="card">
+                  <h3 className="card-title">{editUser ? 'Edit User' : 'Add User'}</h3>
+                  {[['name','Full Name *'],['username','Username *'],['pin','4-digit PIN *']].map(([k,l]) => (
+                    <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l} type={k === 'pin' ? 'password' : 'text'} maxLength={k === 'pin' ? 4 : undefined}
+                      value={editUser ? editUser[k] || '' : userForm[k] || ''}
+                      onChange={e => editUser ? setEditUser({ ...editUser, [k]: e.target.value }) : setUserForm({ ...userForm, [k]: e.target.value })} />
+                  ))}
+                  <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.role : userForm.role}
+                    onChange={e => editUser ? setEditUser({ ...editUser, role: e.target.value }) : setUserForm({ ...userForm, role: e.target.value })}>
+                    <option value="cashier">Cashier</option>
+                    <option value="manager">Manager</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.branch_id : userForm.branch_id}
+                    onChange={e => { const br = branches.find(b => b.id === e.target.value); editUser ? setEditUser({ ...editUser, branch_id: e.target.value, branch_name: br?.name||'' }) : setUserForm({ ...userForm, branch_id: e.target.value, branch_name: br?.name||'' }); }}>
+                    <option value="">No Branch</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-primary" onClick={handleSaveUser}>{editUser ? 'Update' : 'Add User'}</button>
+                    {editUser && <button className="btn" onClick={() => setEditUser(null)}>Cancel</button>}
+                  </div>
+                </div>
+                <div className="card" style={{ flex: 2 }}>
+                  <h3 className="card-title">Users ({appUsers.length})</h3>
+                  {appUsers.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No users added yet</div> : (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          {appUsers.map(u => (
+                            <tr key={u.id}>
+                              <td>{u.name}</td><td>{u.username}</td>
+                              <td><span className="tag">{u.role}</span></td>
+                              <td>{u.branch_name || '-'}</td>
+                              <td><div className="table-actions">
+                                <button className="btn btn-sm" onClick={() => setEditUser({ ...u })}>✏️</button>
+                                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteUser(u.id)}>🗑️</button>
+                              </div></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ LOYALTY POINTS VIEW ═══════════════ */}
+        {view === VIEWS.LOYALTY && (
+          <div className="content-view">
+            <div className="view-header"><h2 className="section-title">⭐ Loyalty Points Program</h2></div>
+            <div className="report-cards">
+              <div className="card">
+                <h3 className="card-title">Program Settings</h3>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={loyaltySettings.enabled} onChange={e => setLoyaltySettings({ ...loyaltySettings, enabled: e.target.checked })} />
+                    <span>Enable Loyalty Program</span>
+                  </label>
+                </div>
+                {[
+                  ['points_per_rupee', 'Points earned per ₹1 spent', 'number'],
+                  ['rupees_per_point', '₹ value of 1 point on redemption', 'number'],
+                  ['min_redeem_points', 'Minimum points to redeem', 'number'],
+                  ['expiry_days', 'Points expiry (days)', 'number'],
+                ].map(([k, l, t]) => (
+                  <div key={k} style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{l}</label>
+                    <input className="input" type={t} value={loyaltySettings[k]}
+                      onChange={e => setLoyaltySettings({ ...loyaltySettings, [k]: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                ))}
+                <div style={{ background: 'var(--bg-tertiary)', borderRadius: 6, padding: 12, marginBottom: 12, fontSize: 13 }}>
+                  <strong>How it works:</strong><br/>
+                  Customer earns <strong>{loyaltySettings.points_per_rupee} pt</strong> per ₹1 spent.<br/>
+                  Minimum <strong>{loyaltySettings.min_redeem_points} pts</strong> needed to redeem.<br/>
+                  1 point = ₹<strong>{loyaltySettings.rupees_per_point}</strong> discount.
+                </div>
+                <button className="btn btn-primary" onClick={handleSaveLoyaltySettings}>Save Settings</button>
+              </div>
+              <div className="card" style={{ flex: 2 }}>
+                <h3 className="card-title">Customer Points Lookup</h3>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <input className="input" placeholder="Enter customer phone..." id="loyalty-phone-input" />
+                  <button className="btn btn-primary" onClick={() => {
+                    const phone = document.getElementById('loyalty-phone-input').value.trim();
+                    if (phone) fetchLoyaltyInfo(phone);
+                  }}>Lookup</button>
+                </div>
+                {loyaltyInfo && (
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 'bold', color: 'var(--accent)', marginBottom: 8 }}>
+                      ⭐ {loyaltyInfo.points} Points
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+                      Redeemable value: ₹{(loyaltyInfo.points * loyaltySettings.rupees_per_point).toFixed(2)}
+                    </div>
+                    <h4 style={{ marginBottom: 8 }}>Recent Transactions</h4>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead><tr><th>Type</th><th>Points</th><th>Reference</th><th>Date</th></tr></thead>
+                        <tbody>
+                          {(loyaltyInfo.transactions || []).map((t, i) => (
+                            <tr key={i}>
+                              <td><span className={`tag ${t.type === 'earned' ? 'tag-success' : 'tag-danger'}`}>{t.type}</span></td>
+                              <td style={{ color: t.points > 0 ? 'var(--success)' : 'var(--danger)' }}>{t.points > 0 ? '+' : ''}{t.points}</td>
+                              <td>{t.reference}</td>
+                              <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                            </tr>
+                          ))}
+                          {loyaltyInfo.transactions?.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No transactions</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ BARCODE LABELS VIEW ═══════════════ */}
+        {view === VIEWS.BARCODE_LABELS && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🏷️ Barcode Label Printing</h2>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>Label size:</span>
+                {['small','medium','large'].map(s => (
+                  <button key={s} className={`btn btn-sm ${labelSize === s ? 'active' : ''}`} onClick={() => setLabelSize(s)}>
+                    {s === 'small' ? '40×25mm' : s === 'medium' ? '60×35mm' : '80×50mm'}
+                  </button>
+                ))}
+                <button className="btn btn-primary" onClick={printBarcodeLabels}>🖨️ Print Labels</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <input className="input" placeholder="Search products..." value={barcodeSearch}
+                onChange={e => { setBarcodeSearchState(e.target.value); setBarcodeProducts(products.filter(p => !e.target.value || p.name.toLowerCase().includes(e.target.value.toLowerCase()) || p.barcode.includes(e.target.value))); }} />
+            </div>
+            <div style={{ marginBottom: 10, display: 'flex', gap: 10 }}>
+              <button className="btn btn-sm" onClick={() => { const q = {}; barcodeProducts.forEach(p => q[p.id] = 1); setBarcodeQty(q); }}>Select All</button>
+              <button className="btn btn-sm" onClick={() => setBarcodeQty({})}>Clear All</button>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
+                {Object.values(barcodeQty).reduce((s, v) => s + (v || 0), 0)} labels to print
+              </span>
+            </div>
+            <div className="table-container">
+              <table className="data-table">
+                <thead><tr><th>Product</th><th>Barcode</th><th>Price</th><th>Category</th><th># Labels</th></tr></thead>
+                <tbody>
+                  {barcodeProducts.map(p => (
+                    <tr key={p.id}>
+                      <td>{p.name}</td>
+                      <td style={{ fontFamily: 'monospace', letterSpacing: 2 }}>{p.barcode}</td>
+                      <td className="amount-text">₹{p.price}</td>
+                      <td>{p.category}</td>
+                      <td style={{ width: 100 }}>
+                        <input type="number" className="input" style={{ width: 80 }} min={0} max={100}
+                          value={barcodeQty[p.id] || 0}
+                          onChange={e => setBarcodeQty({ ...barcodeQty, [p.id]: parseInt(e.target.value) || 0 })} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ LOGIN MODAL ═══════════════ */}
+        {showLoginModal && (
+          <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+              <h3 style={{ marginBottom: 16 }}>🔐 Staff Login</h3>
+              <input className="input" placeholder="Username" style={{ marginBottom: 8 }}
+                value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} />
+              <input className="input" type="password" placeholder="4-digit PIN" maxLength={4} style={{ marginBottom: 16 }}
+                value={loginForm.pin} onChange={e => setLoginForm({ ...loginForm, pin: e.target.value })}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+              <div className="modal-actions">
+                <button className="btn btn-primary" onClick={handleLogin}>Login</button>
+                <button className="btn" onClick={() => setShowLoginModal(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Receipt Modal */}
@@ -3508,468 +3972,6 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* ═══════════════ ANALYTICS / P&L VIEW ═══════════════ */}
-      {view === VIEWS.ANALYTICS && (
-        <div className="content-view">
-          <div className="view-header">
-            <h2 className="section-title">📈 Profit & Loss Analytics</h2>
-            <button className="btn btn-primary" onClick={fetchAnalytics}>Refresh</button>
-          </div>
-          <div className="filters-bar">
-            <div className="period-filters">
-              {['today','week','month','year','all'].map(p => (
-                <button key={p} className={`btn ${analyticsPeriod === p && !analyticsStart ? 'active' : ''}`}
-                  onClick={() => { setAnalyticsPeriod(p); setAnalyticsStart(''); setAnalyticsEnd(''); }}>
-                  {p === 'today' ? 'Today' : p === 'week' ? 'Week' : p === 'month' ? 'Month' : p === 'year' ? 'Year' : 'All'}
-                </button>
-              ))}
-            </div>
-            <div className="date-range">
-              <input className="input date-input" type="date" value={analyticsStart} onChange={e => setAnalyticsStart(e.target.value)} />
-              <span>to</span>
-              <input className="input date-input" type="date" value={analyticsEnd} onChange={e => setAnalyticsEnd(e.target.value)} />
-            </div>
-          </div>
-          {analyticsData && (
-            <>
-              <div className="stats-grid">
-                <div className="stat-card"><div className="stat-label">Total Revenue</div><div className="stat-value amount-text">{formatCurrency(analyticsData.total_revenue)}</div></div>
-                <div className="stat-card"><div className="stat-label">Cost of Goods (COGS)</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_cogs)}</div></div>
-                <div className="stat-card"><div className="stat-label">Gross Profit</div><div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(analyticsData.gross_profit)}</div></div>
-                <div className="stat-card"><div className="stat-label">Gross Margin</div><div className="stat-value">{analyticsData.gross_margin_percent}%</div></div>
-                <div className="stat-card"><div className="stat-label">Expenses</div><div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_expenses)}</div></div>
-                <div className="stat-card"><div className="stat-label">Net Profit</div><div className="stat-value" style={{ color: analyticsData.net_profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatCurrency(analyticsData.net_profit)}</div></div>
-                <div className="stat-card"><div className="stat-label">Total Bills</div><div className="stat-value">{analyticsData.total_bills}</div></div>
-                <div className="stat-card"><div className="stat-label">Avg Bill Value</div><div className="stat-value">{formatCurrency(analyticsData.avg_bill_value)}</div></div>
-              </div>
-              <div className="report-cards">
-                <div className="card">
-                  <h3 className="card-title">Tax & Discounts</h3>
-                  <div className="report-item"><span>Tax Collected (GST)</span><span className="report-value amount-text">{formatCurrency(analyticsData.total_tax_collected)}</span></div>
-                  <div className="report-item"><span>Discounts Given</span><span className="report-value" style={{ color: 'var(--danger)' }}>{formatCurrency(analyticsData.total_discounts)}</span></div>
-                </div>
-                <div className="card">
-                  <h3 className="card-title">Top 10 Revenue Items</h3>
-                  {(analyticsData.top_items || []).map((item, i) => (
-                    <div key={i} className="report-item"><span>{item.name}</span><span className="report-value amount-text">{formatCurrency(item.revenue)}</span></div>
-                  ))}
-                </div>
-              </div>
-              {analyticsData.daily_trend && analyticsData.daily_trend.length > 0 && (
-                <div className="card" style={{ marginTop: 16 }}>
-                  <h3 className="card-title">Daily Revenue Trend</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="data-table">
-                      <thead><tr><th>Date</th><th>Revenue</th></tr></thead>
-                      <tbody>
-                        {analyticsData.daily_trend.slice(-30).map((d, i) => (
-                          <tr key={i}><td>{d.date}</td><td className="amount-text">{formatCurrency(d.revenue)}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-          {!analyticsData && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading analytics...</div>}
-        </div>
-      )}
-
-      {/* ═══════════════ SUPPLIERS VIEW ═══════════════ */}
-      {view === VIEWS.SUPPLIERS && (
-        <div className="content-view">
-          <div className="view-header"><h2 className="section-title">🏭 Supplier Management</h2></div>
-          <div className="report-cards">
-            <div className="card">
-              <h3 className="card-title">{editSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
-              {[['name','Name *'],['phone','Phone'],['email','Email'],['contact_person','Contact Person'],['gstin','GSTIN'],['address','Address']].map(([k,l]) => (
-                <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
-                  value={editSupplier ? editSupplier[k] || '' : supplierForm[k] || ''}
-                  onChange={e => editSupplier ? setEditSupplier({ ...editSupplier, [k]: e.target.value }) : setSupplierForm({ ...supplierForm, [k]: e.target.value })} />
-              ))}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button className="btn btn-primary" onClick={handleSaveSupplier}>{editSupplier ? 'Update' : 'Add Supplier'}</button>
-                {editSupplier && <button className="btn" onClick={() => setEditSupplier(null)}>Cancel</button>}
-              </div>
-            </div>
-            <div className="card" style={{ flex: 2 }}>
-              <h3 className="card-title">Suppliers ({suppliers.length})</h3>
-              <input className="input" placeholder="Search suppliers..." value={supplierSearch}
-                onChange={e => setSupplierSearch(e.target.value)} style={{ marginBottom: 12 }} />
-              <div className="table-container">
-                <table className="data-table">
-                  <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Contact</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {suppliers.filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || s.phone.includes(supplierSearch)).map(s => (
-                      <tr key={s.id}>
-                        <td><strong>{s.name}</strong><br/><span className="sub-text">{s.email}</span></td>
-                        <td>{s.phone}</td>
-                        <td>{s.gstin || '-'}</td>
-                        <td>{s.contact_person || '-'}</td>
-                        <td>
-                          <div className="table-actions">
-                            <button className="btn btn-sm" onClick={() => setEditSupplier({ ...s })}>✏️</button>
-                            <button className="btn btn-sm btn-danger" onClick={() => handleDeleteSupplier(s.id)}>🗑️</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════ PURCHASE ORDERS VIEW ═══════════════ */}
-      {view === VIEWS.PURCHASE_ORDERS && (
-        <div className="content-view">
-          <div className="view-header">
-            <h2 className="section-title">📥 Purchase Orders</h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {['all','pending','received','cancelled'].map(f => (
-                <button key={f} className={`btn btn-sm ${poFilter === f ? 'active' : ''}`}
-                  onClick={() => { setPoFilter(f); fetchPurchaseOrders(); }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
-              ))}
-              <button className="btn btn-primary" onClick={() => setPoView(poView === 'create' ? 'list' : 'create')}>
-                {poView === 'create' ? '← Back to List' : '+ New PO'}
-              </button>
-            </div>
-          </div>
-
-          {poView === 'create' ? (
-            <div className="report-cards">
-              <div className="card">
-                <h3 className="card-title">New Purchase Order</h3>
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Supplier *</label>
-                  <select className="input" value={poForm.supplier_id}
-                    onChange={e => { const s = suppliers.find(x => x.id === e.target.value); setPoForm({ ...poForm, supplier_id: e.target.value, supplier_name: s?.name || '' }); }}>
-                    <option value="">Select Supplier</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <div style={{ flex: 1 }}><label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expected Date</label>
-                    <input type="date" className="input" value={poForm.expected_date} onChange={e => setPoForm({ ...poForm, expected_date: e.target.value })} /></div>
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Notes</label>
-                  <input className="input" placeholder="Notes..." value={poForm.notes} onChange={e => setPoForm({ ...poForm, notes: e.target.value })} />
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Search Products</label>
-                  <input className="input" placeholder="Search products to add..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
-                  <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
-                    {products.filter(p => !poProductSearch || p.name.toLowerCase().includes(poProductSearch.toLowerCase())).slice(0, 10).map(p => (
-                      <div key={p.id} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
-                        onClick={() => addPoItem(p)}>
-                        <span>{p.name}</span><span className="sub-text">Stock: {p.stock} | ₹{p.price}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <h4 style={{ margin: '12px 0 8px' }}>Items ({poForm.items.length})</h4>
-                {poForm.items.map(item => (
-                  <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 6 }}>
-                    <span style={{ flex: 2 }}>{item.product_name}</span>
-                    <input type="number" className="input" style={{ width: 70 }} placeholder="Qty" value={item.quantity} onChange={e => updatePoItem(item.product_id, 'quantity', e.target.value)} />
-                    <input type="number" className="input" style={{ width: 90 }} placeholder="Unit Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
-                    <span style={{ minWidth: 70 }} className="amount-text">₹{item.total_cost.toFixed(2)}</span>
-                    <button className="btn btn-sm btn-danger" onClick={() => removePoItem(item.product_id)}>✕</button>
-                  </div>
-                ))}
-                {poForm.items.length > 0 && (
-                  <div style={{ textAlign: 'right', marginTop: 8, fontSize: 16, fontWeight: 'bold' }}>
-                    Total: ₹{poForm.items.reduce((s, i) => s + i.total_cost, 0).toFixed(2)}
-                  </div>
-                )}
-                <button className="btn btn-primary" style={{ marginTop: 16, width: '100%' }} onClick={handleCreatePO}>Create Purchase Order</button>
-              </div>
-            </div>
-          ) : (
-            <div className="table-container">
-              <table className="data-table">
-                <thead><tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {purchaseOrders.map(po => (
-                    <tr key={po.id}>
-                      <td className="invoice-no">{po.po_number}</td>
-                      <td>{po.supplier_name}</td>
-                      <td>{po.items.length} items</td>
-                      <td className="amount-text">{formatCurrency(po.total)}</td>
-                      <td><span className={`tag ${po.status === 'received' ? 'tag-success' : po.status === 'cancelled' ? 'tag-danger' : ''}`}>{po.status}</span></td>
-                      <td>{new Date(po.created_at).toLocaleDateString()}</td>
-                      <td>
-                        <div className="table-actions">
-                          {po.status === 'pending' && <>
-                            <button className="btn btn-sm btn-primary" onClick={() => handleReceivePO(po.id)}>✓ Receive</button>
-                            <button className="btn btn-sm" onClick={() => handleCancelPO(po.id)}>Cancel</button>
-                          </>}
-                          {po.status !== 'pending' && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{po.received_date ? `Received: ${new Date(po.received_date).toLocaleDateString()}` : po.status}</span>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {purchaseOrders.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>No purchase orders found</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══════════════ BRANCHES & USERS VIEW ═══════════════ */}
-      {view === VIEWS.BRANCHES && (
-        <div className="content-view">
-          <div className="view-header">
-            <h2 className="section-title">🏢 Branches & Users</h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className={`btn ${multibranchTab === 'branches' ? 'active' : ''}`} onClick={() => setMultibranchTab('branches')}>🏢 Branches</button>
-              <button className={`btn ${multibranchTab === 'users' ? 'active' : ''}`} onClick={() => setMultibranchTab('users')}>👤 Users</button>
-              {currentUser ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', background: 'var(--bg-tertiary)', borderRadius: 6 }}>
-                  <span style={{ fontSize: 12 }}>👤 {currentUser.name} ({currentUser.role})</span>
-                  <button className="btn btn-sm" onClick={handleLogout}>Logout</button>
-                </div>
-              ) : (
-                <button className="btn btn-primary" onClick={() => setShowLoginModal(true)}>🔐 Login</button>
-              )}
-            </div>
-          </div>
-
-          {multibranchTab === 'branches' ? (
-            <div className="report-cards">
-              <div className="card">
-                <h3 className="card-title">{editBranch ? 'Edit Branch' : 'Add Branch'}</h3>
-                {[['name','Branch Name *'],['address','Address'],['phone','Phone'],['gstin','GSTIN']].map(([k,l]) => (
-                  <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
-                    value={editBranch ? editBranch[k] || '' : branchForm[k] || ''}
-                    onChange={e => editBranch ? setEditBranch({ ...editBranch, [k]: e.target.value }) : setBranchForm({ ...branchForm, [k]: e.target.value })} />
-                ))}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-primary" onClick={handleSaveBranch}>{editBranch ? 'Update' : 'Add Branch'}</button>
-                  {editBranch && <button className="btn" onClick={() => setEditBranch(null)}>Cancel</button>}
-                </div>
-              </div>
-              <div className="card" style={{ flex: 2 }}>
-                <h3 className="card-title">Branches ({branches.length})</h3>
-                {branches.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No branches added yet</div> : (
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {branches.map(b => (
-                          <tr key={b.id}>
-                            <td><strong>{b.name}</strong><br/><span className="sub-text">{b.address}</span></td>
-                            <td>{b.phone}</td><td>{b.gstin || '-'}</td>
-                            <td><div className="table-actions">
-                              <button className="btn btn-sm" onClick={() => setEditBranch({ ...b })}>✏️</button>
-                              <button className="btn btn-sm btn-danger" onClick={() => handleDeleteBranch(b.id)}>🗑️</button>
-                            </div></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="report-cards">
-              <div className="card">
-                <h3 className="card-title">{editUser ? 'Edit User' : 'Add User'}</h3>
-                {[['name','Full Name *'],['username','Username *'],['pin','4-digit PIN *']].map(([k,l]) => (
-                  <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l} type={k === 'pin' ? 'password' : 'text'} maxLength={k === 'pin' ? 4 : undefined}
-                    value={editUser ? editUser[k] || '' : userForm[k] || ''}
-                    onChange={e => editUser ? setEditUser({ ...editUser, [k]: e.target.value }) : setUserForm({ ...userForm, [k]: e.target.value })} />
-                ))}
-                <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.role : userForm.role}
-                  onChange={e => editUser ? setEditUser({ ...editUser, role: e.target.value }) : setUserForm({ ...userForm, role: e.target.value })}>
-                  <option value="cashier">Cashier</option>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
-                </select>
-                <select className="input" style={{ marginBottom: 8 }} value={editUser ? editUser.branch_id : userForm.branch_id}
-                  onChange={e => { const br = branches.find(b => b.id === e.target.value); editUser ? setEditUser({ ...editUser, branch_id: e.target.value, branch_name: br?.name||'' }) : setUserForm({ ...userForm, branch_id: e.target.value, branch_name: br?.name||'' }); }}>
-                  <option value="">No Branch</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-primary" onClick={handleSaveUser}>{editUser ? 'Update' : 'Add User'}</button>
-                  {editUser && <button className="btn" onClick={() => setEditUser(null)}>Cancel</button>}
-                </div>
-              </div>
-              <div className="card" style={{ flex: 2 }}>
-                <h3 className="card-title">Users ({appUsers.length})</h3>
-                {appUsers.length === 0 ? <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>No users added yet</div> : (
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {appUsers.map(u => (
-                          <tr key={u.id}>
-                            <td>{u.name}</td><td>{u.username}</td>
-                            <td><span className="tag">{u.role}</span></td>
-                            <td>{u.branch_name || '-'}</td>
-                            <td><div className="table-actions">
-                              <button className="btn btn-sm" onClick={() => setEditUser({ ...u })}>✏️</button>
-                              <button className="btn btn-sm btn-danger" onClick={() => handleDeleteUser(u.id)}>🗑️</button>
-                            </div></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══════════════ LOYALTY POINTS VIEW ═══════════════ */}
-      {view === VIEWS.LOYALTY && (
-        <div className="content-view">
-          <div className="view-header"><h2 className="section-title">⭐ Loyalty Points Program</h2></div>
-          <div className="report-cards">
-            <div className="card">
-              <h3 className="card-title">Program Settings</h3>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={loyaltySettings.enabled} onChange={e => setLoyaltySettings({ ...loyaltySettings, enabled: e.target.checked })} />
-                  <span>Enable Loyalty Program</span>
-                </label>
-              </div>
-              {[
-                ['points_per_rupee', 'Points earned per ₹1 spent', 'number'],
-                ['rupees_per_point', '₹ value of 1 point on redemption', 'number'],
-                ['min_redeem_points', 'Minimum points to redeem', 'number'],
-                ['expiry_days', 'Points expiry (days)', 'number'],
-              ].map(([k, l, t]) => (
-                <div key={k} style={{ marginBottom: 10 }}>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{l}</label>
-                  <input className="input" type={t} value={loyaltySettings[k]}
-                    onChange={e => setLoyaltySettings({ ...loyaltySettings, [k]: parseFloat(e.target.value) || 0 })} />
-                </div>
-              ))}
-              <div style={{ background: 'var(--bg-tertiary)', borderRadius: 6, padding: 12, marginBottom: 12, fontSize: 13 }}>
-                <strong>How it works:</strong><br/>
-                Customer earns <strong>{loyaltySettings.points_per_rupee} pt</strong> per ₹1 spent.<br/>
-                Minimum <strong>{loyaltySettings.min_redeem_points} pts</strong> needed to redeem.<br/>
-                1 point = ₹<strong>{loyaltySettings.rupees_per_point}</strong> discount.
-              </div>
-              <button className="btn btn-primary" onClick={handleSaveLoyaltySettings}>Save Settings</button>
-            </div>
-            <div className="card" style={{ flex: 2 }}>
-              <h3 className="card-title">Customer Points Lookup</h3>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <input className="input" placeholder="Enter customer phone..." id="loyalty-phone-input" />
-                <button className="btn btn-primary" onClick={() => {
-                  const phone = document.getElementById('loyalty-phone-input').value.trim();
-                  if (phone) fetchLoyaltyInfo(phone);
-                }}>Lookup</button>
-              </div>
-              {loyaltyInfo && (
-                <div>
-                  <div style={{ fontSize: 24, fontWeight: 'bold', color: 'var(--accent)', marginBottom: 8 }}>
-                    ⭐ {loyaltyInfo.points} Points
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-                    Redeemable value: ₹{(loyaltyInfo.points * loyaltySettings.rupees_per_point).toFixed(2)}
-                  </div>
-                  <h4 style={{ marginBottom: 8 }}>Recent Transactions</h4>
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead><tr><th>Type</th><th>Points</th><th>Reference</th><th>Date</th></tr></thead>
-                      <tbody>
-                        {(loyaltyInfo.transactions || []).map((t, i) => (
-                          <tr key={i}>
-                            <td><span className={`tag ${t.type === 'earned' ? 'tag-success' : 'tag-danger'}`}>{t.type}</span></td>
-                            <td style={{ color: t.points > 0 ? 'var(--success)' : 'var(--danger)' }}>{t.points > 0 ? '+' : ''}{t.points}</td>
-                            <td>{t.reference}</td>
-                            <td>{new Date(t.created_at).toLocaleDateString()}</td>
-                          </tr>
-                        ))}
-                        {loyaltyInfo.transactions?.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No transactions</td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════ BARCODE LABELS VIEW ═══════════════ */}
-      {view === VIEWS.BARCODE_LABELS && (
-        <div className="content-view">
-          <div className="view-header">
-            <h2 className="section-title">🏷️ Barcode Label Printing</h2>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>Label size:</span>
-              {['small','medium','large'].map(s => (
-                <button key={s} className={`btn btn-sm ${labelSize === s ? 'active' : ''}`} onClick={() => setLabelSize(s)}>
-                  {s === 'small' ? '40×25mm' : s === 'medium' ? '60×35mm' : '80×50mm'}
-                </button>
-              ))}
-              <button className="btn btn-primary" onClick={printBarcodeLabels}>🖨️ Print Labels</button>
-            </div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <input className="input" placeholder="Search products..." value={barcodeSearch}
-              onChange={e => { setBarcodeSearchState(e.target.value); setBarcodeProducts(products.filter(p => !e.target.value || p.name.toLowerCase().includes(e.target.value.toLowerCase()) || p.barcode.includes(e.target.value))); }} />
-          </div>
-          <div style={{ marginBottom: 10, display: 'flex', gap: 10 }}>
-            <button className="btn btn-sm" onClick={() => { const q = {}; barcodeProducts.forEach(p => q[p.id] = 1); setBarcodeQty(q); }}>Select All</button>
-            <button className="btn btn-sm" onClick={() => setBarcodeQty({})}>Clear All</button>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
-              {Object.values(barcodeQty).reduce((s, v) => s + (v || 0), 0)} labels to print
-            </span>
-          </div>
-          <div className="table-container">
-            <table className="data-table">
-              <thead><tr><th>Product</th><th>Barcode</th><th>Price</th><th>Category</th><th># Labels</th></tr></thead>
-              <tbody>
-                {barcodeProducts.map(p => (
-                  <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td style={{ fontFamily: 'monospace', letterSpacing: 2 }}>{p.barcode}</td>
-                    <td className="amount-text">₹{p.price}</td>
-                    <td>{p.category}</td>
-                    <td style={{ width: 100 }}>
-                      <input type="number" className="input" style={{ width: 80 }} min={0} max={100}
-                        value={barcodeQty[p.id] || 0}
-                        onChange={e => setBarcodeQty({ ...barcodeQty, [p.id]: parseInt(e.target.value) || 0 })} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════ LOGIN MODAL ═══════════════ */}
-      {showLoginModal && (
-        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
-            <h3 style={{ marginBottom: 16 }}>🔐 Staff Login</h3>
-            <input className="input" placeholder="Username" style={{ marginBottom: 8 }}
-              value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} />
-            <input className="input" type="password" placeholder="4-digit PIN" maxLength={4} style={{ marginBottom: 16 }}
-              value={loginForm.pin} onChange={e => setLoginForm({ ...loginForm, pin: e.target.value })}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()} />
-            <div className="modal-actions">
-              <button className="btn btn-primary" onClick={handleLogin}>Login</button>
-              <button className="btn" onClick={() => setShowLoginModal(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Notification */}
       {notification && (
