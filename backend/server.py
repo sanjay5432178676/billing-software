@@ -328,7 +328,8 @@ async def create_bill(bill: BillCreate):
     if bill.customer_phone:
         customer = await db.customers.find_one({"phone": bill.customer_phone}, {"_id": 0})
         if customer:
-            new_balance = customer.get('balance', 0.0) + bill.balance_amount
+            # Only add to balance if cashier explicitly entered a partial payment
+            new_balance = customer.get('balance', 0.0) + (bill.balance_amount if bill.balance_amount > 0 else 0)
             await db.customers.update_one(
                 {"phone": bill.customer_phone},
                 {
@@ -342,7 +343,7 @@ async def create_bill(bill: BillCreate):
                 phone=bill.customer_phone,
                 total_purchases=bill.total,
                 visit_count=1,
-                balance=bill.balance_amount
+                balance=bill.balance_amount if bill.balance_amount > 0 else 0.0
             )
             customer_doc = new_customer.model_dump()
             customer_doc['created_at'] = customer_doc['created_at'].isoformat()
@@ -794,6 +795,8 @@ async def get_day_close_report(date: str):
         "top_products": top_products,
         "bills": bills
     }
+
+app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1302,5 +1305,3 @@ async def get_profit_loss(
         "daily_trend": daily_trend,
         "top_items": top_items,
     }
-
-app.include_router(api_router)
