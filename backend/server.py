@@ -796,8 +796,6 @@ async def get_day_close_report(date: str):
         "bills": bills
     }
 
-app.include_router(api_router)
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1305,3 +1303,5 @@ async def get_profit_loss(
         "daily_trend": daily_trend,
         "top_items": top_items,
     }
+
+app.include_router(api_router)
