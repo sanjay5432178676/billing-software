@@ -464,20 +464,61 @@ async def get_customers(search: Optional[str] = None):
             {'phone': {'$regex': search, '$options': 'i'}}
         ]
     customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
+
+    # Recalculate each customer's balance from unsettled bills (source of truth)
+    unsettled_bills = await db.bills.find(
+        {"settled": False, "balance_amount": {"$gt": 0}, "customer_phone": {"$ne": ""}},
+        {"_id": 0, "customer_phone": 1, "balance_amount": 1}
+    ).to_list(10000)
+    phone_balance: Dict[str, float] = {}
+    for b in unsettled_bills:
+        ph = b.get("customer_phone", "")
+        if ph:
+            phone_balance[ph] = phone_balance.get(ph, 0.0) + b.get("balance_amount", 0.0)
+
     for c in customers:
         if isinstance(c.get('created_at'), str):
             c['created_at'] = datetime.fromisoformat(c['created_at'])
+        c['balance'] = round(phone_balance.get(c.get('phone', ''), 0.0), 2)
     return customers
 
 @api_router.get("/customers/balance", response_model=List[Customer])
 async def get_customers_with_balance():
-    customers = await db.customers.find({"balance": {"$gt": 0}}, {"_id": 0}).to_list(1000)
+    # Recompute each customer's balance from unsettled bills (source of truth)
+    unsettled_bills = await db.bills.find(
+        {"settled": False, "balance_amount": {"$gt": 0}, "customer_phone": {"$ne": ""}},
+        {"_id": 0}
+    ).to_list(10000)
+
+    # Aggregate balance per customer phone
+    phone_balance: Dict[str, float] = {}
+    phone_name: Dict[str, str] = {}
+    for b in unsettled_bills:
+        ph = b.get("customer_phone", "")
+        if ph:
+            phone_balance[ph] = phone_balance.get(ph, 0.0) + b.get("balance_amount", 0.0)
+            phone_name[ph] = b.get("customer_name", "")
+
+    if not phone_balance:
+        return []
+
+    # Fetch matching customers and patch their balance from bills
+    customers = await db.customers.find(
+        {"phone": {"$in": list(phone_balance.keys())}}, {"_id": 0}
+    ).to_list(1000)
+
+    result = []
     for c in customers:
         if isinstance(c.get('created_at'), str):
             c['created_at'] = datetime.fromisoformat(c['created_at'])
-        if 'balance' not in c:
-            c['balance'] = 0.0
-    return customers
+        ph = c.get("phone", "")
+        c['balance'] = round(phone_balance.get(ph, 0.0), 2)
+        # Also sync the stored balance field so it stays accurate
+        await db.customers.update_one({"phone": ph}, {"$set": {"balance": c['balance']}})
+        if c['balance'] > 0:
+            result.append(c)
+
+    return result
 
 @api_router.post("/customers/{phone}/pay-balance")
 async def pay_customer_balance(phone: str, amount: float):
