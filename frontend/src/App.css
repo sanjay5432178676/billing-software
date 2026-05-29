@@ -268,7 +268,8 @@ body {
   flex-direction: row;
   flex: 1;
   overflow: hidden;
-  align-items: flex-start;
+  align-items: stretch;
+  min-height: 0;
 }
 
 /* Left side: scrolls freely showing all products then checkout */
@@ -320,9 +321,11 @@ body {
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
   position: sticky;
   top: 0;
+  gap: 0;
 }
 
 .cart-scroll-area { display: contents; }
@@ -362,6 +365,8 @@ body {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-light);
 }
 
 .cart-items {
@@ -433,7 +438,12 @@ body {
   color: var(--text-muted);
 }
 
-.discount-section,
+.discount-section {
+  margin-bottom: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+
 .payment-section,
 .payment-mode-section,
 .balance-section,
@@ -515,6 +525,9 @@ body {
 .cart-actions {
   display: flex;
   gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 4px;
 }
 
 .cart-actions .btn:first-child {
@@ -523,6 +536,8 @@ body {
 
 .cart-actions .btn:last-child {
   flex: 2;
+  font-size: 15px;
+  padding: 12px;
 }
 
 /* ===== Product Card ===== */
