@@ -223,9 +223,16 @@ body {
 /* ===== Main Content ===== */
 .main-content {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* POS view is a direct child of main-content — must fill height */
+.main-content > .pos-view {
+  flex: 1;
   min-height: 0;
 }
 
@@ -267,20 +274,19 @@ body {
   display: flex;
   flex-direction: row;
   flex: 1;
-  overflow: hidden;
-  align-items: stretch;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* Left side: scrolls freely showing all products then checkout */
+/* Left panel — scrolls vertically, all products visible */
 .product-panel {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   padding: 20px;
   overflow-y: auto;
-  height: 100%;
-  min-width: 0;
+  overflow-x: hidden;
 }
 
 .search-bar {
@@ -302,7 +308,7 @@ body {
   flex-wrap: wrap;
 }
 
-/* Products grid — all cards visible, no inner scroll */
+/* Products grid — no inner scroll, all cards shown */
 .products-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -310,22 +316,17 @@ body {
   padding-bottom: 24px;
 }
 
-/* Right side: fixed-width cart, full scroll */
+/* Right panel — fixed width, full vertical scroll */
 .cart-panel {
-  width: 400px;
+  width: 380px;
   flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-left: 2px solid var(--accent);
-  border-top: none;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--accent);
   overflow-y: auto;
   overflow-x: hidden;
   padding: 20px;
-  position: sticky;
-  top: 0;
-  gap: 0;
 }
 
 .cart-scroll-area { display: contents; }
