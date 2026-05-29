@@ -226,12 +226,14 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .content-view {
   padding: 20px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .view-header {
@@ -256,22 +258,23 @@ body {
 /* ===== POS View ===== */
 .pos-view {
   display: flex;
+  flex-direction: column;
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .product-panel {
-  flex: 1;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  overflow: hidden;
+  padding: 20px 20px 0 20px;
 }
 
 .search-bar {
   display: flex;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
@@ -283,28 +286,25 @@ body {
 .category-filters {
   display: flex;
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
 .products-grid {
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 8px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 14px;
+  padding-bottom: 20px;
 }
 
 .cart-panel {
-  width: 420px;
+  width: 100%;
   background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
+  border-left: none;
+  border-top: 2px solid var(--accent);
   display: flex;
   flex-direction: column;
   padding: 20px;
-  overflow-y: auto;
-  flex-shrink: 0;
 }
 
 .cart-header {
@@ -1071,7 +1071,7 @@ select.input {
   }
   
   .products-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
   }
 }
 
@@ -1109,27 +1109,17 @@ select.input {
     padding: 16px;
   }
 
-  .pos-view {
-    flex-direction: column;
-    overflow-y: auto;
-  }
-
   .product-panel {
-    padding: 16px;
-    padding-top: 0;
-    overflow: visible;
+    padding: 12px 12px 0 12px;
   }
 
   .cart-panel {
-    width: 100%;
-    border-left: none;
-    border-top: 2px solid var(--accent);
-    padding: 16px;
+    padding: 12px;
   }
 
   .products-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
+    gap: 10px;
   }
 
   .section-title {
