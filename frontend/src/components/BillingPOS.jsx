@@ -165,6 +165,7 @@ const BillingPOS = () => {
   // Thermal Print
   const [thermalWidth, setThermalWidth] = useState(() => localStorage.getItem('thermal_width') || '80');
   const [thermalFont, setThermalFont] = useState(() => localStorage.getItem('thermal_font') || '12');
+  const [thermalBill, setThermalBill] = useState(null);
 
   // Barcode Labels
   const [barcodeProducts, setBarcodeProducts] = useState([]);
@@ -303,7 +304,7 @@ const BillingPOS = () => {
       await axios.post(`${API}/seed`);
       loadData();
     } catch (error) {
-      console.log('Seed error (already seeded)');
+      console.log('Seed error (probably already seeded)');
     }
   };
 
@@ -1369,7 +1370,7 @@ const BillingPOS = () => {
 
   return (
     <div className="pos-container">
-      {/* Sidebar Navigation */}
+      {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h1 className="logo">{settings.software_name || 'POS'}</h1>
@@ -1451,10 +1452,9 @@ const BillingPOS = () => {
 
       <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>☰</button>
 
-      {/* Main Container Dashboard Area */}
+      {/* Main Content */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
-        
-        {/* Point Of Sale Grid Panel */}
+        {/* POS View */}
         {view === VIEWS.POS && (
           <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
             <div style={{ flex:1, minWidth:0, overflowY:'auto', overflowX:'hidden', padding:20 }}>
@@ -1522,10 +1522,11 @@ const BillingPOS = () => {
             </div>
 
             {/* Checkout Panel Sidebar */}
-            <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', overflowY: 'auto', overflowX: 'hidden', padding: 20, height: '100%' }}>
+            <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', height: '100%' }}>
               
-              <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Current Bill</span>
+              {/* Header (Sticky at top) */}
+              <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 10px 20px', flexShrink: 0 }}>
+                <span style={{ fontWeight: 'bold', fontSize: '16px' }}>Current Bill</span>
                 {cart.length > 0 && (
                   <button
                     className="btn btn-sm btn-danger"
@@ -1550,8 +1551,9 @@ const BillingPOS = () => {
                 )}
               </div>
 
+              {/* Held Carts area */}
               {heldCarts.length > 0 && (
-                <div className="held-carts">
+                <div className="held-carts" style={{ padding: '0 20px 10px 20px', flexShrink: 0 }}>
                   <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
                   {heldCarts.map(hc => (
                     <button
@@ -1566,8 +1568,8 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              {/* ── 1. Cart Items (Fixed Order Sorting) ── */}
-              <div className="cart-items">
+              {/* ── 1. Scrollable Cart Items Window ── */}
+              <div className="cart-items" style={{ flex: '1 1 auto', overflowY: 'auto', padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
                 {cart.length === 0 ? (
                   <div className="empty-cart">Cart is empty</div>
                 ) : (
@@ -1619,9 +1621,10 @@ const BillingPOS = () => {
                 )}
               </div>
 
-              {/* ── 2. Discount + Bill Summary ── */}
+              {/* ── 2. Checkout Controls Footer Section ── */}
               {cart.length > 0 && (
-                <>
+                <div style={{ flexShrink: 0, padding: 20, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
+                  
                   <div className="discount-section">
                     <div className="section-label">Discount:</div>
                     <div className="discount-options">
@@ -1674,7 +1677,6 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
-                  {/* ── 3. Customer Details ── */}
                   <div className="customer-inputs">
                     <input
                       data-testid="customer-name-input"
@@ -1692,9 +1694,8 @@ const BillingPOS = () => {
                     />
                   </div>
 
-                  {/* ── 4. Loyalty Points ── */}
                   {customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled && (
-                    <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)' }}>
+                    <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)', marginBottom: 12 }}>
                       <div className="section-label" style={{ color: 'var(--accent)' }}>
                         ⭐ Loyalty Points: {loyaltyInfo ? loyaltyInfo.points : 0} pts
                       </div>
@@ -1716,7 +1717,6 @@ const BillingPOS = () => {
                     </div>
                   )}
 
-                  {/* ── 5. Payment Method ── */}
                   <div className="payment-section">
                     <div className="section-label">Payment Method:</div>
                     <div className="payment-methods">
@@ -1733,7 +1733,6 @@ const BillingPOS = () => {
                     </div>
                   </div>
 
-                  {/* ── 6. Amount Paid ── */}
                   <div className="cash-section">
                     <div className="section-label">Amount Paid (leave blank = full payment):</div>
                     <input
@@ -1755,7 +1754,6 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
-                  {/* ── 7. Actions ── */}
                   <div className="cart-actions">
                     <button
                       data-testid="hold-cart-btn"
@@ -1772,13 +1770,14 @@ const BillingPOS = () => {
                       Checkout
                     </button>
                   </div>
-                </>
+
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Low Stock View Dashboard */}
+        {/* Low Stock View */}
         {view === VIEWS.LOW_STOCK && (
           <div className="content-view">
             <div className="view-header">
@@ -1908,7 +1907,7 @@ const BillingPOS = () => {
                   className="input"
                   placeholder="Barcode *"
                   value={newProduct.barcode}
-                  onChange={(e) => setNewProduct({ ...newProduct, stock: newProduct.stock, barcode: e.target.value })}
+                  onChange={(e) => setNewProduct({ ...newProduct, barcode: e.target.value })}
                 />
                 <input
                   data-testid="new-product-unit"
@@ -2266,7 +2265,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Reports View Summary */}
+        {/* Reports View */}
         {view === VIEWS.REPORTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2359,7 +2358,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Day Close Lock View Dashboard */}
+        {/* Day Close View */}
         {view === VIEWS.DAY_CLOSE && (
           <div className="content-view">
             <div className="view-header">
@@ -2501,7 +2500,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Home Base Dashboard View Panel */}
+        {/* Dashboard View */}
         {view === VIEWS.DASHBOARD && (
           <div className="content-view">
             <div className="view-header">
@@ -2611,7 +2610,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Stock Adjustments Panel */}
+        {/* Stock Adjustments View */}
         {view === VIEWS.STOCK_ADJUSTMENTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2705,7 +2704,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Quotations Management View */}
+        {/* Quotations View */}
         {view === VIEWS.QUOTATIONS && (
           <div className="content-view">
             <div className="view-header">
@@ -2826,7 +2825,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Returns View Terminal */}
+        {/* Returns View */}
         {view === VIEWS.RETURNS && (
           <div className="content-view">
             <div className="view-header">
@@ -2836,7 +2835,7 @@ const BillingPOS = () => {
             <div className="card add-product-card">
               <h3 className="card-title">Process Return</h3>
               <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-                <input className="input" placeholder="Enter Invoice Number..."
+                <input className="input" placeholder="Enter Invoice Number (e.g. INV-20260526-0001)"
                   value={returnBillNo} onChange={e => setReturnBillNo(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && searchReturnBill()} />
                 <button className="btn btn-primary" onClick={searchReturnBill} disabled={returnLoading}>
@@ -2874,7 +2873,7 @@ const BillingPOS = () => {
                     Total Refund: <span className="amount-text">{formatCurrency(returnItems.reduce((s, i) => s + i.price * i.return_qty, 0))}</span>
                   </div>
 
-                  <input className="input" placeholder="Reason for return..."
+                  <input className="input" placeholder="Reason for return (e.g. Damaged, Wrong item...)"
                     value={returnReason} onChange={e => setReturnReason(e.target.value)} style={{ marginBottom: 12 }} />
 
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -2913,7 +2912,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Expenses View (Fixed Dropdown expression) */}
+        {/* Expenses View */}
         {view === VIEWS.EXPENSES && (
           <div className="content-view">
             <div className="view-header">
@@ -3016,7 +3015,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Settings Configurations Panel */}
+        {/* Settings View */}
         {view === VIEWS.SETTINGS && (
           <div className="content-view">
             <div className="view-header">
@@ -3084,7 +3083,7 @@ const BillingPOS = () => {
                       className="input"
                       placeholder="Email"
                       type="email"
-                      value={settings.settings_email || settings.email}
+                      value={settings.email}
                       onChange={(e) => setSettings({ ...settings, email: e.target.value })}
                     />
                   </div>
@@ -3303,7 +3302,7 @@ const BillingPOS = () => {
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Search Products</label>
-                    <input className="input" placeholder="Search products..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
+                    <input className="input" placeholder="Search products to add..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
                     <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
                       {products.filter(p => !poProductSearch || p.name.toLowerCase().includes(poProductSearch.toLowerCase())).slice(0, 10).map(p => (
                         <div key={p.id} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
@@ -3318,7 +3317,7 @@ const BillingPOS = () => {
                     <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 6 }}>
                       <span style={{ flex: 2 }}>{item.product_name}</span>
                       <input type="number" className="input" style={{ width: 70 }} placeholder="Qty" value={item.quantity} onChange={e => updatePoItem(item.product_id, 'quantity', e.target.value)} />
-                      <input type="number" className="input" style={{ width: 90 }} placeholder="Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
+                      <input type="number" className="input" style={{ width: 90 }} placeholder="Unit Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
                       <span style={{ minWidth: 70 }} className="amount-text">₹{item.total_cost.toFixed(2)}</span>
                       <button className="btn btn-sm btn-danger" onClick={() => removePoItem(item.product_id)}>✕</button>
                     </div>
@@ -3390,7 +3389,7 @@ const BillingPOS = () => {
                     <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
                       value={editBranch ? editBranch[k] || '' : branchForm[k] || ''}
                       onChange={e => editBranch ? setEditBranch({ ...editBranch, [k]: e.target.value }) : setBranchForm({ ...branchForm, [k]: e.target.value })} />
-                ))}
+                  ))}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button className="btn btn-primary" onClick={handleSaveBranch}>{editBranch ? 'Update' : 'Add Branch'}</button>
                     {editBranch && <button className="btn" onClick={() => setEditBranch(null)}>Cancel</button>}
@@ -3595,7 +3594,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* STAFF LOGIN MODAL */}
+        {/* LOGIN MODAL */}
         {showLoginModal && (
           <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
@@ -3615,7 +3614,7 @@ const BillingPOS = () => {
 
       </div>
 
-      {/* Receipt Preview Popup Window */}
+      {/* Receipt Modal */}
       {showReceipt && (
         <div className="modal-overlay" onClick={() => setShowReceipt(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
@@ -3728,7 +3727,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Inventory Product Details Modal */}
+      {/* Edit Product Modal */}
       {editProduct && (
         <div className="modal-overlay" onClick={() => setEditProduct(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="edit-product-modal">
@@ -3801,7 +3800,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Customer Purchase History Log Modal */}
+      {/* Customer History Modal */}
       {customerHistory && (
         <div className="modal-overlay" onClick={() => setCustomerHistory(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900 }} data-testid="customer-history-modal">
@@ -3885,7 +3884,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Customer Profiles Base Modal */}
+      {/* Edit Customer Modal */}
       {editingCustomer && (
         <div className="modal-overlay" onClick={() => setEditingCustomer(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }} data-testid="edit-balance-modal">
@@ -3916,7 +3915,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Quotation Info Popup Window */}
+      {/* Quotation Modal */}
       {showQuotation && (
         <div className="modal-overlay" onClick={() => setShowQuotation(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -3965,7 +3964,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Alert Banner Notification Trigger */}
+      {/* Notification */}
       {notification && (
         <div
           className={`notification ${notification.type}`}
