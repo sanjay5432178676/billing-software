@@ -1816,7 +1816,6 @@ const BillingPOS = () => {
                 </>
               )}
             </div>
-          </div>
         )}
 
         {/* Low Stock View */}
