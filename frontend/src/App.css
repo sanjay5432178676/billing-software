@@ -548,16 +548,29 @@ body {
   border-radius: 8px;
   padding: 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.15s, box-shadow 0.15s;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
 }
 
 .product-card:hover {
   border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(245, 166, 35, 0.2);
+  box-shadow: 0 2px 8px rgba(245, 166, 35, 0.15);
+}
+
+.product-card:active {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+.product-card:focus {
+  outline: none;
+  border-color: var(--border);
 }
 
 .product-header {
