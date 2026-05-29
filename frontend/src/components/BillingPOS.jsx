@@ -1558,6 +1558,26 @@ const BillingPOS = () => {
                   );
                 })}
               </div>
+
+              {/* Checkout anchor - visible after scrolling past all products */}
+              {cart.length > 0 && (
+                <div style={{
+                  margin: '8px 0 24px',
+                  padding: '14px',
+                  background: 'var(--bg-secondary)',
+                  border: '2px solid var(--accent)',
+                  borderRadius: 10,
+                  textAlign: 'center',
+                  color: 'var(--accent)',
+                  fontWeight: 'bold',
+                  fontSize: 15,
+                  cursor: 'pointer'
+                }}
+                  onClick={() => document.querySelector('.cart-panel').scrollIntoView({ behavior: 'smooth' })}
+                >
+                  🛒 {cart.reduce((s, i) => s + i.quantity, 0)} items in bill — View Cart & Checkout →
+                </div>
+              )}
             </div>
 
             <div className="cart-panel">
