@@ -433,6 +433,28 @@ async def update_customer_balance(phone: str, balance: float):
         raise HTTPException(status_code=404, detail="Customer not found")
     return {"message": "Balance updated", "balance": max(0, balance)}
 
+@api_router.put("/customers/{phone}/info")
+async def update_customer_info(phone: str, data: dict):
+    new_name = data.get("name", "").strip()
+    new_phone = data.get("phone", "").strip()
+    if not new_name or not new_phone:
+        raise HTTPException(status_code=400, detail="Name and phone are required")
+    # If phone changed, check no other customer has that phone
+    if new_phone != phone:
+        existing = await db.customers.find_one({"phone": new_phone}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Phone number already in use")
+        # Update phone on all related bills too
+        await db.bills.update_many({"customer_phone": phone}, {"$set": {"customer_phone": new_phone, "customer_name": new_name}})
+        await db.loyalty_transactions.update_many({"customer_phone": phone}, {"$set": {"customer_phone": new_phone}})
+    result = await db.customers.update_one(
+        {"phone": phone},
+        {"$set": {"name": new_name, "phone": new_phone}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"message": "Customer updated", "name": new_name, "phone": new_phone}
+
 @api_router.delete("/customers/{phone}")
 async def delete_customer(phone: str):
     result = await db.customers.delete_one({"phone": phone})
@@ -1059,20 +1081,24 @@ async def receive_purchase_order(po_id: str):
         raise HTTPException(status_code=400, detail="PO already received")
     # Update stock for each item
     for item in po["items"]:
+        # Fetch current stock BEFORE update
+        product_doc = await db.products.find_one({"id": item["product_id"]}, {"_id": 0, "stock": 1})
+        previous_stock = product_doc.get("stock", 0) if product_doc else 0
+        new_stock = previous_stock + item["quantity"]
+
         await db.products.update_one(
             {"id": item["product_id"]},
             {"$inc": {"stock": item["quantity"]}}
         )
-        # Log stock adjustment
-        from datetime import timezone as tz
+        # Log stock adjustment with correct before/after values
         adj = {
             "id": str(uuid.uuid4()),
             "product_id": item["product_id"],
             "product_name": item["product_name"],
             "adjustment_type": "add",
             "quantity": item["quantity"],
-            "previous_stock": 0,
-            "new_stock": 0,
+            "previous_stock": previous_stock,
+            "new_stock": new_stock,
             "reason": f"Purchase Order {po['po_number']}",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
