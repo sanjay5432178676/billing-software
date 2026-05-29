@@ -301,11 +301,11 @@ body {
   flex-wrap: wrap;
 }
 
-/* Products grid — NO overflow, all cards visible, no inner scroll */
+/* Products grid — all cards visible, no inner scroll */
 .products-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
   padding-bottom: 24px;
 }
 
@@ -325,13 +325,8 @@ body {
   top: 0;
 }
 
-.cart-scroll-area {
-  display: contents;
-}
-
-.cart-fixed-bottom {
-  display: contents;
-}
+.cart-scroll-area { display: contents; }
+.cart-fixed-bottom { display: contents; }
 
 .cart-header {
   font-size: 20px;
