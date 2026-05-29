@@ -309,7 +309,7 @@ body {
   padding-bottom: 24px;
 }
 
-/* Right side: fixed-width cart, always visible, independently scrollable */
+/* Right side: fixed-width cart, full scroll */
 .cart-panel {
   width: 400px;
   flex-shrink: 0;
@@ -318,11 +318,19 @@ body {
   border-top: none;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  overflow-y: auto;
   height: 100%;
+  overflow-y: auto;
+  padding: 20px;
   position: sticky;
   top: 0;
+}
+
+.cart-scroll-area {
+  display: contents;
+}
+
+.cart-fixed-bottom {
+  display: contents;
 }
 
 .cart-header {
@@ -362,13 +370,11 @@ body {
 }
 
 .cart-items {
-  flex: 1;
-  overflow-y: auto;
-  margin-bottom: 16px;
-  min-height: 100px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding-bottom: 12px;
+  min-height: 60px;
 }
 
 .empty-cart {
