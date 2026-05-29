@@ -1492,11 +1492,11 @@ const BillingPOS = () => {
       </button>
 
       {/* Main Content */}
-      <div className="main-content" style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
         {/* POS View */}
         {view === VIEWS.POS && (
-          <div className="pos-view" style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
-            <div className="product-panel" style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflowY:'auto', overflowX:'hidden', padding:20 }}>
+          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
+            <div style={{ flex:1, minWidth:0, overflowY:'auto', overflowX:'hidden', padding:20 }}>
               <div className="search-bar">
                 <input
                   data-testid="barcode-input"
@@ -1562,7 +1562,7 @@ const BillingPOS = () => {
               {/* Checkout anchor - visible after scrolling past all products */}
             </div>
 
-            <div className="cart-panel" style={{ width:380, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', overflowY:'auto', overflowX:'hidden', padding:20 }}>
+            <div style={{ width:380, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', overflowY:'auto', overflowX:'hidden', padding:20, height:'100%' }}>
               {/* ── Header ── */}
               <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Current Bill</span>
