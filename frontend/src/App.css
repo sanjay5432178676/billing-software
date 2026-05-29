@@ -229,6 +229,13 @@ body {
   min-height: 0;
 }
 
+/* pos-view sits directly inside main-content and needs to fill height */
+.main-content > .pos-view-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .content-view {
   padding: 20px;
   overflow-y: auto;
@@ -258,17 +265,21 @@ body {
 /* ===== POS View ===== */
 .pos-view {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
+  align-items: flex-start;
 }
 
+/* Left side: scrolls freely showing all products then checkout */
 .product-panel {
-  width: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 20px 20px 0 20px;
+  padding: 20px;
+  overflow-y: auto;
+  height: 100%;
+  min-width: 0;
 }
 
 .search-bar {
@@ -290,21 +301,28 @@ body {
   flex-wrap: wrap;
 }
 
+/* Products grid — NO overflow, all cards visible, no inner scroll */
 .products-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 14px;
-  padding-bottom: 20px;
+  padding-bottom: 24px;
 }
 
+/* Right side: fixed-width cart, always visible, independently scrollable */
 .cart-panel {
-  width: 100%;
+  width: 400px;
+  flex-shrink: 0;
   background: var(--bg-secondary);
-  border-left: none;
-  border-top: 2px solid var(--accent);
+  border-left: 2px solid var(--accent);
+  border-top: none;
   display: flex;
   flex-direction: column;
   padding: 20px;
+  overflow-y: auto;
+  height: 100%;
+  position: sticky;
+  top: 0;
 }
 
 .cart-header {
@@ -1070,8 +1088,12 @@ select.input {
     width: 360px;
   }
   
+  .cart-panel {
+    width: 340px;
+  }
+
   .products-grid {
-    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
 }
 
@@ -1109,12 +1131,24 @@ select.input {
     padding: 16px;
   }
 
+  .pos-view {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
   .product-panel {
-    padding: 12px 12px 0 12px;
+    padding: 12px;
+    height: auto;
+    overflow-y: visible;
   }
 
   .cart-panel {
+    width: 100%;
+    height: auto;
+    border-left: none;
+    border-top: 2px solid var(--accent);
     padding: 12px;
+    position: static;
   }
 
   .products-grid {
