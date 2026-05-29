@@ -1561,7 +1561,31 @@ const BillingPOS = () => {
             </div>
 
             <div className="cart-panel">
-              <div className="cart-header">Current Bill</div>
+              <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Current Bill</span>
+                {cart.length > 0 && (
+                  <button
+                    className="btn btn-sm btn-danger"
+                    style={{ fontSize: 12, padding: '4px 12px' }}
+                    onClick={() => {
+                      if (window.confirm('Clear all items from this bill?')) {
+                        setCart([]);
+                        setDiscountPercent(0);
+                        setCustomDiscount('');
+                        setCustomerPaid('');
+                        setCustomerName('');
+                        setCustomerPhone('');
+                        setLoyaltyDiscount(0);
+                        setRedeemPoints('');
+                        setLoyaltyInfo(null);
+                        showNotification('Bill cleared', 'success');
+                      }
+                    }}
+                  >
+                    🗑️ Clear Bill
+                  </button>
+                )}
+              </div>
 
               {heldCarts.length > 0 && (
                 <div className="held-carts">
