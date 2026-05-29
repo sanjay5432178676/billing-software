@@ -1537,8 +1537,8 @@ const BillingPOS = () => {
                       key={product.id}
                       data-testid={`product-${product.barcode}`}
                       className="product-card"
-                      onClick={() => product.stock > 0 && addToCart(product)}
-                      style={{ opacity: product.stock === 0 ? 0.5 : 1 }}
+                      onClick={(e) => { e.currentTarget.blur(); product.stock > 0 && addToCart(product); }}
+                      style={{ opacity: product.stock === 0 ? 0.5 : 1, cursor: product.stock === 0 ? 'not-allowed' : 'pointer' }}
                     >
                       <div className="product-header">
                         <span className="tag" style={{ background: getCategoryColor(product.category) }}>
