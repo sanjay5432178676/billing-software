@@ -127,7 +127,7 @@ const BillingPOS = () => {
   const [expenseSearch, setExpenseSearch] = useState('');
   const EXPENSE_CATEGORIES = ['Rent', 'Electricity', 'Salary', 'Purchase', 'Transport', 'Maintenance', 'Other'];
 
-  // ── Suppliers & Purchase Orders ──────────────────────────────────────
+  // Suppliers & Purchase Orders
   const [suppliers, setSuppliers] = useState([]);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [supplierForm, setSupplierForm] = useState({ name:'', phone:'', email:'', address:'', gstin:'', contact_person:'' });
@@ -135,10 +135,10 @@ const BillingPOS = () => {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [poForm, setPoForm] = useState({ supplier_id:'', supplier_name:'', notes:'', expected_date:'', items:[] });
   const [poProductSearch, setPoProductSearch] = useState('');
-  const [poView, setPoView] = useState('list'); // 'list' | 'create'
+  const [poView, setPoView] = useState('list');
   const [poFilter, setPoFilter] = useState('all');
 
-  // ── Branches & Users ─────────────────────────────────────────────────
+  // Branches & Users
   const [branches, setBranches] = useState([]);
   const [branchForm, setBranchForm] = useState({ name:'', address:'', phone:'', gstin:'' });
   const [editBranch, setEditBranch] = useState(null);
@@ -148,30 +148,29 @@ const BillingPOS = () => {
   const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('pos_current_user') || 'null'));
   const [loginForm, setLoginForm] = useState({ username:'', pin:'' });
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [multibranchTab, setMultibranchTab] = useState('branches'); // 'branches' | 'users'
+  const [multibranchTab, setMultibranchTab] = useState('branches');
 
-  // ── Loyalty ──────────────────────────────────────────────────────────
+  // Loyalty
   const [loyaltySettings, setLoyaltySettings] = useState({ enabled:true, points_per_rupee:1.0, rupees_per_point:0.10, min_redeem_points:100, expiry_days:365 });
-  const [loyaltyInfo, setLoyaltyInfo] = useState(null);   // { points, transactions }
+  const [loyaltyInfo, setLoyaltyInfo] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState('');
   const [loyaltyDiscount, setLoyaltyDiscount] = useState(0);
 
-  // ── Analytics / P&L ─────────────────────────────────────────────────
+  // Analytics / P&L
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState('month');
   const [analyticsStart, setAnalyticsStart] = useState('');
   const [analyticsEnd, setAnalyticsEnd] = useState('');
 
-  // ── Thermal Print ────────────────────────────────────────────────────
+  // Thermal Print
   const [thermalWidth, setThermalWidth] = useState(() => localStorage.getItem('thermal_width') || '80');
   const [thermalFont, setThermalFont] = useState(() => localStorage.getItem('thermal_font') || '12');
-  const [thermalBill, setThermalBill] = useState(null);
 
-  // ── Barcode Labels ───────────────────────────────────────────────────
+  // Barcode Labels
   const [barcodeProducts, setBarcodeProducts] = useState([]);
   const [barcodeSearch, setBarcodeSearchState] = useState('');
   const [barcodeQty, setBarcodeQty] = useState({});
-  const [labelSize, setLabelSize] = useState('small'); // 'small'|'medium'|'large'
+  const [labelSize, setLabelSize] = useState('small');
 
   const barcodeRef = useRef(null);
 
@@ -223,7 +222,6 @@ const BillingPOS = () => {
     }
   }, [view, billSearch, billStartDate, billEndDate]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -300,15 +298,12 @@ const BillingPOS = () => {
   };
 
   const seedDataIfEmpty = async () => {
-    if (!BACKEND_URL) {
-      console.error('REACT_APP_BACKEND_URL is not set');
-      return;
-    }
+    if (!BACKEND_URL) return;
     try {
       await axios.post(`${API}/seed`);
       loadData();
     } catch (error) {
-      console.log('Seed error (probably already seeded)');
+      console.log('Seed error (already seeded)');
     }
   };
 
@@ -503,7 +498,6 @@ const BillingPOS = () => {
     }
   };
 
-  // ── PDF Download ──────────────────────────────────────────────────
   const downloadBillPDF = (bill) => {
     const win = window.open('', '_blank');
     const shopName = (typeof settings !== 'undefined' && settings.shop_name) ? settings.shop_name : 'Shop';
@@ -547,7 +541,6 @@ const BillingPOS = () => {
     win.onload = () => { win.focus(); win.print(); };
   };
 
-  // ── Returns ────────────────────────────────────────────────────────
   const searchReturnBill = async () => {
     if (!returnBillNo.trim()) { showNotification('Enter invoice number', 'error'); return; }
     setReturnLoading(true);
@@ -583,7 +576,6 @@ const BillingPOS = () => {
       customer_phone: returnBill.customer_phone,
       created_at: new Date().toISOString()
     };
-    // Restore stock
     for (const item of itemsToReturn) {
       await axios.post(`${API}/stock-adjustments`, {
         product_id: item.product_id,
@@ -603,7 +595,6 @@ const BillingPOS = () => {
     await loadData();
   };
 
-  // ── Expenses ───────────────────────────────────────────────────────
   const addExpense = () => {
     if (!expenseForm.amount || parseFloat(expenseForm.amount) <= 0) {
       showNotification('Enter valid amount', 'error'); return;
@@ -732,9 +723,7 @@ const BillingPOS = () => {
     }
 
     const { subtotal, discountAmount, taxAmount, total, discount } = calculateBill();
-    // Apply loyalty discount on top
     const effectiveTotal = Math.max(0, total - loyaltyDiscount);
-    // If cashier left "Amount Paid" blank → full payment, no balance stored
     const paidEntry = customerPaid.toString().trim();
     const paid = paidEntry === '' ? effectiveTotal : (parseFloat(paidEntry) || 0);
 
@@ -743,12 +732,10 @@ const BillingPOS = () => {
     let finalChangeGiven = 0;
 
     if (paidEntry === '' || paid >= effectiveTotal) {
-      // Full payment or no amount entered → zero balance
       finalCashReceived = paid;
       finalChangeGiven = Math.max(0, paid - effectiveTotal);
       finalBalanceAmount = 0;
     } else {
-      // Cashier explicitly entered a partial amount → store balance
       finalCashReceived = paid;
       finalBalanceAmount = effectiveTotal - paid;
       finalChangeGiven = 0;
@@ -782,7 +769,6 @@ const BillingPOS = () => {
       showNotification('Bill generated successfully', 'success');
       setShowReceipt(res.data);
 
-      // Handle loyalty: redeem used points & earn new ones
       if (customerPhone && loyaltySettings.enabled) {
         const earnPhone = customerPhone;
         const earnName = customerName || 'Customer';
@@ -916,11 +902,6 @@ const BillingPOS = () => {
     window.open(`https://wa.me/${customer.phone}?text=${message}`, '_blank');
   };
 
-  // ══════════════════════════════════════════════════════════════════════
-  // NEW FEATURE FUNCTIONS
-  // ══════════════════════════════════════════════════════════════════════
-
-  // ── Suppliers ──────────────────────────────────────────────────────────
   const fetchSuppliers = async () => {
     try {
       const res = await axios.get(`${API}/suppliers`);
@@ -950,7 +931,6 @@ const BillingPOS = () => {
     fetchSuppliers();
   };
 
-  // ── Purchase Orders ────────────────────────────────────────────────────
   const fetchPurchaseOrders = async () => {
     try {
       const params = poFilter !== 'all' ? { status: poFilter } : {};
@@ -1013,7 +993,6 @@ const BillingPOS = () => {
     } catch (e) { showNotification('Error cancelling PO', 'error'); }
   };
 
-  // ── Branches & Users ───────────────────────────────────────────────────
   const fetchBranches = async () => {
     try {
       const res = await axios.get(`${API}/branches`);
@@ -1091,7 +1070,6 @@ const BillingPOS = () => {
     showNotification('Logged out', 'success');
   };
 
-  // ── Loyalty ────────────────────────────────────────────────────────────
   const fetchLoyaltySettings = async () => {
     try {
       const res = await axios.get(`${API}/loyalty/settings`);
@@ -1124,21 +1102,18 @@ const BillingPOS = () => {
     } catch (e) { showNotification('Error saving loyalty settings', 'error'); }
   };
 
-  // ── Analytics ──────────────────────────────────────────────────────────
   const fetchAnalytics = async () => {
     try {
       const params = { period: analyticsPeriod };
       if (analyticsStart) params.start_date = new Date(analyticsStart).toISOString();
       if (analyticsEnd) params.end_date = new Date(analyticsEnd + 'T23:59:59').toISOString();
       const res = await axios.get(`${API}/reports/profit-loss`, { params });
-      // Merge local expenses
       const localExpenses = JSON.parse(localStorage.getItem('pos_expenses') || '[]');
       const totalExpenses = localExpenses.reduce((s, e) => s + (e.amount || 0), 0);
       setAnalyticsData({ ...res.data, total_expenses: totalExpenses, net_profit: res.data.gross_profit - totalExpenses });
     } catch (e) { showNotification('Error fetching analytics', 'error'); }
   };
 
-  // ── Thermal Print ──────────────────────────────────────────────────────
   const printThermal = (bill) => {
     const w = parseInt(thermalWidth);
     const font = parseInt(thermalFont);
@@ -1191,14 +1166,12 @@ const BillingPOS = () => {
     win.onload = () => { win.focus(); win.print(); win.onafterprint = () => win.close(); };
   };
 
-  // ── WhatsApp Auto-Send ─────────────────────────────────────────────────
   const sendBillWhatsAppAuto = (bill) => {
     if (!bill.customer_phone) { showNotification('No customer phone number', 'error'); return; }
     sendBillViaWhatsApp(bill);
     showNotification('Opening WhatsApp...', 'success');
   };
 
-  // ── Barcode Labels ─────────────────────────────────────────────────────
   const printBarcodeLabels = () => {
     const selected = barcodeProducts.filter(p => barcodeQty[p.id] > 0);
     if (selected.length === 0) { showNotification('Select at least one product', 'error'); return; }
@@ -1396,7 +1369,7 @@ const BillingPOS = () => {
 
   return (
     <div className="pos-container">
-      {/* Sidebar */}
+      {/* Sidebar Navigation */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h1 className="logo">{settings.software_name || 'POS'}</h1>
@@ -1470,26 +1443,18 @@ const BillingPOS = () => {
             <div>F7 Returns &nbsp; F8 Expenses</div>
             <div>Esc Close modal</div>
           </div>
-          <div style={{
-            textAlign: 'center',
-            padding: '8px',
-            borderTop: '1px solid var(--border)',
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-          }}>
+          <div style={{ textAlign: 'center', padding: '8px', borderTop: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-muted)' }}>
             <div style={{ fontWeight: '600', fontSize: '12px', color: 'var(--accent)' }}>SS Technologies</div>
           </div>
         </div>
       </div>
 
-      {/* Mobile Menu Button */}
-      <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>
-        ☰
-      </button>
+      <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>☰</button>
 
-      {/* Main Content */}
+      {/* Main Container Dashboard Area */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
-        {/* POS View */}
+        
+        {/* Point Of Sale Grid Panel */}
         {view === VIEWS.POS && (
           <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
             <div style={{ flex:1, minWidth:0, overflowY:'auto', overflowX:'hidden', padding:20 }}>
@@ -1556,8 +1521,9 @@ const BillingPOS = () => {
               </div>
             </div>
 
-            <div style={{ width:380, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', overflowY:'auto', overflowX:'hidden', padding:20, height:'100%' }}>
-              {/* ── Header ── */}
+            {/* Checkout Panel Sidebar */}
+            <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', overflowY: 'auto', overflowX: 'hidden', padding: 20, height: '100%' }}>
+              
               <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Current Bill</span>
                 {cart.length > 0 && (
@@ -1584,7 +1550,6 @@ const BillingPOS = () => {
                 )}
               </div>
 
-              {/* ── Held Carts ── */}
               {heldCarts.length > 0 && (
                 <div className="held-carts">
                   <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
@@ -1601,54 +1566,56 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              {/* ── 1. Cart Items ── */}
+              {/* ── 1. Cart Items (Fixed Order Sorting) ── */}
               <div className="cart-items">
                 {cart.length === 0 ? (
                   <div className="empty-cart">Cart is empty</div>
                 ) : (
-                  cart.map(item => (
-                    <div key={item.product_id} className="cart-item" data-testid={`cart-item-${item.product_id}`}>
-                      <div className="cart-item-header">
-                        <span className="cart-item-name">{item.name}</span>
-                        <button
-                          data-testid={`remove-item-${item.product_id}`}
-                          className="btn btn-danger btn-sm"
-                          onClick={() => removeFromCart(item.product_id)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      <div className="cart-item-controls">
-                        <div className="qty-controls">
+                  [...cart]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(item => (
+                      <div key={item.product_id} className="cart-item" data-testid={`cart-item-${item.product_id}`}>
+                        <div className="cart-item-header">
+                          <span className="cart-item-name">{item.name}</span>
                           <button
-                            data-testid={`decrease-qty-${item.product_id}`}
-                            className="btn btn-sm"
-                            onClick={() => updateQuantity(item.product_id, item.quantity - 1)}
+                            data-testid={`remove-item-${item.product_id}`}
+                            className="btn btn-danger btn-sm"
+                            onClick={() => removeFromCart(item.product_id)}
                           >
-                            −
-                          </button>
-                          <input
-                            data-testid={`qty-input-${item.product_id}`}
-                            className="input qty-input"
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value) || 1)}
-                          />
-                          <button
-                            data-testid={`increase-qty-${item.product_id}`}
-                            className="btn btn-sm"
-                            onClick={() => updateQuantity(item.product_id, item.quantity + 1)}
-                          >
-                            +
+                            ✕
                           </button>
                         </div>
-                        <span className="cart-item-total">{formatCurrency(item.price * item.quantity)}</span>
+                        <div className="cart-item-controls">
+                          <div className="qty-controls">
+                            <button
+                              data-testid={`decrease-qty-${item.product_id}`}
+                              className="btn btn-sm"
+                              onClick={() => updateQuantity(item.product_id, item.quantity - 1)}
+                            >
+                              −
+                            </button>
+                            <input
+                              data-testid={`qty-input-${item.product_id}`}
+                              className="input qty-input"
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value) || 1)}
+                            />
+                            <button
+                              data-testid={`increase-qty-${item.product_id}`}
+                              className="btn btn-sm"
+                              onClick={() => updateQuantity(item.product_id, item.quantity + 1)}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span className="cart-item-total">{formatCurrency(item.price * item.quantity)}</span>
+                        </div>
+                        <div className="cart-item-detail">
+                          {formatCurrency(item.price)} × {item.quantity}
+                        </div>
                       </div>
-                      <div className="cart-item-detail">
-                        {formatCurrency(item.price)} × {item.quantity}
-                      </div>
-                    </div>
-                  ))
+                    ))
                 )}
               </div>
 
@@ -1811,7 +1778,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Low Stock View */}
+        {/* Low Stock View Dashboard */}
         {view === VIEWS.LOW_STOCK && (
           <div className="content-view">
             <div className="view-header">
@@ -1941,7 +1908,7 @@ const BillingPOS = () => {
                   className="input"
                   placeholder="Barcode *"
                   value={newProduct.barcode}
-                  onChange={(e) => setNewProduct({ ...newProduct, barcode: e.target.value })}
+                  onChange={(e) => setNewProduct({ ...newProduct, stock: newProduct.stock, barcode: e.target.value })}
                 />
                 <input
                   data-testid="new-product-unit"
@@ -2092,36 +2059,36 @@ const BillingPOS = () => {
                       </td>
                       <td>
                         <div className="table-actions">
-                        <button
-                          data-testid={`view-bill-${bill.invoice_no}`}
-                          className="btn btn-sm"
-                          onClick={() => setShowReceipt(bill)}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => downloadBillPDF(bill)}
-                        >
-                          📄 PDF
-                        </button>
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => printThermal(bill)}
-                          title="Thermal Print"
-                        >
-                          🖨️
-                        </button>
-                        {bill.customer_phone && (
+                          <button
+                            data-testid={`view-bill-${bill.invoice_no}`}
+                            className="btn btn-sm"
+                            onClick={() => setShowReceipt(bill)}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={() => downloadBillPDF(bill)}
+                          >
+                            📄 PDF
+                          </button>
                           <button
                             className="btn btn-sm"
-                            onClick={() => sendBillWhatsAppAuto(bill)}
-                            title="Send via WhatsApp"
+                            onClick={() => printThermal(bill)}
+                            title="Thermal Print"
                           >
-                            📱
+                            🖨️
                           </button>
-                        )}
-                      </div>
+                          {bill.customer_phone && (
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => sendBillWhatsAppAuto(bill)}
+                              title="Send via WhatsApp"
+                            >
+                              📱
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2299,7 +2266,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Reports View */}
+        {/* Reports View Summary */}
         {view === VIEWS.REPORTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2392,7 +2359,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Day Close View */}
+        {/* Day Close Lock View Dashboard */}
         {view === VIEWS.DAY_CLOSE && (
           <div className="content-view">
             <div className="view-header">
@@ -2419,7 +2386,6 @@ const BillingPOS = () => {
 
             {!dayCloseLoading && dayCloseData && (
               <>
-                {/* Summary Cards */}
                 <div className="stats-grid">
                   <div className="stat-card">
                     <div className="stat-label">Total Bills</div>
@@ -2447,7 +2413,6 @@ const BillingPOS = () => {
                   </div>
                 </div>
 
-                {/* Payment Breakdown + Top Products */}
                 <div className="report-cards">
                   <div className="card">
                     <h3 className="card-title">Payment Breakdown</h3>
@@ -2476,7 +2441,6 @@ const BillingPOS = () => {
                   </div>
                 </div>
 
-                {/* Bills Table */}
                 {dayCloseData.bills && dayCloseData.bills.length > 0 && (
                   <div className="card" style={{ marginTop: '20px' }}>
                     <h3 className="card-title">Bills for {dayCloseDate}</h3>
@@ -2537,7 +2501,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Dashboard View */}
+        {/* Home Base Dashboard View Panel */}
         {view === VIEWS.DASHBOARD && (
           <div className="content-view">
             <div className="view-header">
@@ -2647,7 +2611,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Stock Adjustments View */}
+        {/* Stock Adjustments Panel */}
         {view === VIEWS.STOCK_ADJUSTMENTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2741,14 +2705,13 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Quotations View */}
+        {/* Quotations Management View */}
         {view === VIEWS.QUOTATIONS && (
           <div className="content-view">
             <div className="view-header">
               <h2 className="section-title">📋 Quotations</h2>
             </div>
 
-            {/* Create Quotation */}
             <div className="card add-product-card">
               <h3 className="card-title">Create New Quotation</h3>
               <div className="form-grid">
@@ -2816,7 +2779,6 @@ const BillingPOS = () => {
               )}
             </div>
 
-            {/* Quotation List */}
             <div className="card" style={{ marginTop: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h3 className="card-title" style={{ margin: 0 }}>All Quotations</h3>
@@ -2864,7 +2826,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Returns View */}
+        {/* Returns View Terminal */}
         {view === VIEWS.RETURNS && (
           <div className="content-view">
             <div className="view-header">
@@ -2874,7 +2836,7 @@ const BillingPOS = () => {
             <div className="card add-product-card">
               <h3 className="card-title">Process Return</h3>
               <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-                <input className="input" placeholder="Enter Invoice Number (e.g. INV-20260526-0001)"
+                <input className="input" placeholder="Enter Invoice Number..."
                   value={returnBillNo} onChange={e => setReturnBillNo(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && searchReturnBill()} />
                 <button className="btn btn-primary" onClick={searchReturnBill} disabled={returnLoading}>
@@ -2912,7 +2874,7 @@ const BillingPOS = () => {
                     Total Refund: <span className="amount-text">{formatCurrency(returnItems.reduce((s, i) => s + i.price * i.return_qty, 0))}</span>
                   </div>
 
-                  <input className="input" placeholder="Reason for return (e.g. Damaged, Wrong item...)"
+                  <input className="input" placeholder="Reason for return..."
                     value={returnReason} onChange={e => setReturnReason(e.target.value)} style={{ marginBottom: 12 }} />
 
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -2923,7 +2885,6 @@ const BillingPOS = () => {
               )}
             </div>
 
-            {/* Return History */}
             <div className="card" style={{ marginTop: 20 }}>
               <h3 className="card-title">Return History ({returns.length})</h3>
               {returns.length === 0 ? (
@@ -2952,7 +2913,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Expenses View */}
+        {/* Expenses View (Fixed Dropdown expression) */}
         {view === VIEWS.EXPENSES && (
           <div className="content-view">
             <div className="view-header">
@@ -2960,7 +2921,6 @@ const BillingPOS = () => {
               <button className="btn btn-primary" onClick={exportExpenses}>Export Excel</button>
             </div>
 
-            {/* Summary Cards */}
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-label">Total Expenses</div>
@@ -2984,7 +2944,6 @@ const BillingPOS = () => {
               </div>
             </div>
 
-            {/* Add Expense Form */}
             <div className="card add-product-card">
               <h3 className="card-title">Add Expense</h3>
               <div className="form-grid">
@@ -3010,7 +2969,6 @@ const BillingPOS = () => {
               <button className="btn btn-primary" onClick={addExpense}>➕ Add Expense</button>
             </div>
 
-            {/* Expense List */}
             <div className="card" style={{ marginTop: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h3 className="card-title" style={{ margin: 0 }}>Expense History</h3>
@@ -3040,11 +2998,10 @@ const BillingPOS = () => {
               )}
             </div>
 
-            {/* Category Breakdown */}
             {expenses.length > 0 && (
               <div className="card" style={{ marginTop: 20 }}>
                 <h3 className="card-title">By Category</h3>
-                {['Rent','Electricity','Salary','Purchase','Transport','Maintenance','Other'].map(cat => {
+                {EXPENSE_CATEGORIES.map(cat => {
                   const total = expenses.filter(e => e.category === cat).reduce((s, e) => s + e.amount, 0);
                   if (total === 0) return null;
                   return (
@@ -3059,7 +3016,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Settings View */}
+        {/* Settings Configurations Panel */}
         {view === VIEWS.SETTINGS && (
           <div className="content-view">
             <div className="view-header">
@@ -3127,7 +3084,7 @@ const BillingPOS = () => {
                       className="input"
                       placeholder="Email"
                       type="email"
-                      value={settings.email}
+                      value={settings.settings_email || settings.email}
                       onChange={(e) => setSettings({ ...settings, email: e.target.value })}
                     />
                   </div>
@@ -3193,7 +3150,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ ANALYTICS / P&L VIEW ═══════════════ */}
+        {/* ANALYTICS VIEW */}
         {view === VIEWS.ANALYTICS && (
           <div className="content-view">
             <div className="view-header">
@@ -3261,7 +3218,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ SUPPLIERS VIEW ═══════════════ */}
+        {/* SUPPLIERS VIEW */}
         {view === VIEWS.SUPPLIERS && (
           <div className="content-view">
             <div className="view-header"><h2 className="section-title">🏭 Supplier Management</h2></div>
@@ -3308,7 +3265,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ PURCHASE ORDERS VIEW ═══════════════ */}
+        {/* PURCHASE ORDERS VIEW */}
         {view === VIEWS.PURCHASE_ORDERS && (
           <div className="content-view">
             <div className="view-header">
@@ -3346,7 +3303,7 @@ const BillingPOS = () => {
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Search Products</label>
-                    <input className="input" placeholder="Search products to add..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
+                    <input className="input" placeholder="Search products..." value={poProductSearch} onChange={e => setPoProductSearch(e.target.value)} />
                     <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
                       {products.filter(p => !poProductSearch || p.name.toLowerCase().includes(poProductSearch.toLowerCase())).slice(0, 10).map(p => (
                         <div key={p.id} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
@@ -3361,7 +3318,7 @@ const BillingPOS = () => {
                     <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 6 }}>
                       <span style={{ flex: 2 }}>{item.product_name}</span>
                       <input type="number" className="input" style={{ width: 70 }} placeholder="Qty" value={item.quantity} onChange={e => updatePoItem(item.product_id, 'quantity', e.target.value)} />
-                      <input type="number" className="input" style={{ width: 90 }} placeholder="Unit Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
+                      <input type="number" className="input" style={{ width: 90 }} placeholder="Cost" value={item.unit_cost} onChange={e => updatePoItem(item.product_id, 'unit_cost', e.target.value)} />
                       <span style={{ minWidth: 70 }} className="amount-text">₹{item.total_cost.toFixed(2)}</span>
                       <button className="btn btn-sm btn-danger" onClick={() => removePoItem(item.product_id)}>✕</button>
                     </div>
@@ -3406,7 +3363,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ BRANCHES & USERS VIEW ═══════════════ */}
+        {/* BRANCHES & USERS VIEW */}
         {view === VIEWS.BRANCHES && (
           <div className="content-view">
             <div className="view-header">
@@ -3433,7 +3390,7 @@ const BillingPOS = () => {
                     <input key={k} className="input" style={{ marginBottom: 8 }} placeholder={l}
                       value={editBranch ? editBranch[k] || '' : branchForm[k] || ''}
                       onChange={e => editBranch ? setEditBranch({ ...editBranch, [k]: e.target.value }) : setBranchForm({ ...branchForm, [k]: e.target.value })} />
-                  ))}
+                ))}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button className="btn btn-primary" onClick={handleSaveBranch}>{editBranch ? 'Update' : 'Add Branch'}</button>
                     {editBranch && <button className="btn" onClick={() => setEditBranch(null)}>Cancel</button>}
@@ -3515,7 +3472,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ LOYALTY POINTS VIEW ═══════════════ */}
+        {/* LOYALTY POINTS VIEW */}
         {view === VIEWS.LOYALTY && (
           <div className="content-view">
             <div className="view-header"><h2 className="section-title">⭐ Loyalty Points Program</h2></div>
@@ -3589,7 +3546,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ BARCODE LABELS VIEW ═══════════════ */}
+        {/* BARCODE LABELS VIEW */}
         {view === VIEWS.BARCODE_LABELS && (
           <div className="content-view">
             <div className="view-header">
@@ -3638,7 +3595,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ═══════════════ LOGIN MODAL ═══════════════ */}
+        {/* STAFF LOGIN MODAL */}
         {showLoginModal && (
           <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
@@ -3658,7 +3615,7 @@ const BillingPOS = () => {
 
       </div>
 
-      {/* Receipt Modal */}
+      {/* Receipt Preview Popup Window */}
       {showReceipt && (
         <div className="modal-overlay" onClick={() => setShowReceipt(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
@@ -3771,7 +3728,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Product Modal */}
+      {/* Edit Inventory Product Details Modal */}
       {editProduct && (
         <div className="modal-overlay" onClick={() => setEditProduct(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="edit-product-modal">
@@ -3844,7 +3801,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Customer History Modal */}
+      {/* Customer Purchase History Log Modal */}
       {customerHistory && (
         <div className="modal-overlay" onClick={() => setCustomerHistory(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900 }} data-testid="customer-history-modal">
@@ -3928,7 +3885,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Customer Modal */}
+      {/* Edit Customer Profiles Base Modal */}
       {editingCustomer && (
         <div className="modal-overlay" onClick={() => setEditingCustomer(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }} data-testid="edit-balance-modal">
@@ -3959,7 +3916,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Quotation Modal */}
+      {/* Quotation Info Popup Window */}
       {showQuotation && (
         <div className="modal-overlay" onClick={() => setShowQuotation(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -4008,7 +3965,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Notification */}
+      {/* Alert Banner Notification Trigger */}
       {notification && (
         <div
           className={`notification ${notification.type}`}
