@@ -1278,15 +1278,18 @@ const BillingPOS = () => {
 
   const handleUpdateCustomerBalance = async () => {
     if (!editingCustomer) return;
+    if (!editingCustomer.name.trim()) { showNotification('Name is required', 'error'); return; }
+    if (!editingCustomer.phone.trim()) { showNotification('Phone is required', 'error'); return; }
     try {
-      await axios.put(`${API}/customers/${editingCustomer.phone}/balance`, null, {
-        params: { balance: parseFloat(editingCustomer.balance) || 0 }
+      await axios.put(`${API}/customers/${editingCustomer._originalPhone || editingCustomer.phone}/info`, {
+        name: editingCustomer.name.trim(),
+        phone: editingCustomer.phone.trim()
       });
-      showNotification('Balance updated', 'success');
+      showNotification('Customer updated', 'success');
       setEditingCustomer(null);
       await loadData();
     } catch (error) {
-      showNotification('Error updating balance', 'error');
+      showNotification('Error updating customer', 'error');
     }
   };
 
@@ -2240,7 +2243,7 @@ const BillingPOS = () => {
                             </button>
                             <button
                               className="btn btn-sm"
-                              onClick={() => setEditingCustomer({ ...customer })}
+                              onClick={() => setEditingCustomer({ ...customer, _originalPhone: customer.phone })}
                               data-testid={`edit-balance-${customer.phone}`}
                             >
                               ✏️ Edit
@@ -3897,28 +3900,26 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Customer Balance Modal */}
+      {/* Edit Customer Modal */}
       {editingCustomer && (
         <div className="modal-overlay" onClick={() => setEditingCustomer(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }} data-testid="edit-balance-modal">
-            <h3 className="modal-title">Edit Customer Balance</h3>
+            <h3 className="modal-title">Edit Customer</h3>
             <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
               <div className="form-group">
                 <label>Customer Name</label>
-                <input className="input" value={editingCustomer.name} disabled />
+                <input
+                  className="input"
+                  value={editingCustomer.name}
+                  onChange={(e) => setEditingCustomer({ ...editingCustomer, name: e.target.value })}
+                />
               </div>
               <div className="form-group">
                 <label>Phone</label>
-                <input className="input" value={editingCustomer.phone} disabled />
-              </div>
-              <div className="form-group">
-                <label>Balance Amount</label>
                 <input
-                  data-testid="edit-balance-input"
                   className="input"
-                  type="number"
-                  value={editingCustomer.balance}
-                  onChange={(e) => setEditingCustomer({ ...editingCustomer, balance: e.target.value })}
+                  value={editingCustomer.phone}
+                  onChange={(e) => setEditingCustomer({ ...editingCustomer, phone: e.target.value })}
                 />
               </div>
             </div>
