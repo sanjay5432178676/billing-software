@@ -1560,27 +1560,10 @@ const BillingPOS = () => {
               </div>
 
               {/* Checkout anchor - visible after scrolling past all products */}
-              {cart.length > 0 && (
-                <div style={{
-                  margin: '8px 0 24px',
-                  padding: '14px',
-                  background: 'var(--bg-secondary)',
-                  border: '2px solid var(--accent)',
-                  borderRadius: 10,
-                  textAlign: 'center',
-                  color: 'var(--accent)',
-                  fontWeight: 'bold',
-                  fontSize: 15,
-                  cursor: 'pointer'
-                }}
-                  onClick={() => document.querySelector('.cart-panel').scrollIntoView({ behavior: 'smooth' })}
-                >
-                  🛒 {cart.reduce((s, i) => s + i.quantity, 0)} items in bill — View Cart & Checkout →
-                </div>
-              )}
             </div>
 
             <div className="cart-panel">
+              {/* ── Header ── */}
               <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Current Bill</span>
                 {cart.length > 0 && (
@@ -1607,6 +1590,7 @@ const BillingPOS = () => {
                 )}
               </div>
 
+              {/* ── Held Carts ── */}
               {heldCarts.length > 0 && (
                 <div className="held-carts">
                   <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
@@ -1623,23 +1607,7 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              <div className="customer-inputs">
-                <input
-                  data-testid="customer-name-input"
-                  className="input"
-                  placeholder="Customer Name"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                />
-                <input
-                  data-testid="customer-phone-input"
-                  className="input"
-                  placeholder="Customer Phone"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                />
-              </div>
-
+              {/* ── 1. Cart Items ── */}
               <div className="cart-items">
                 {cart.length === 0 ? (
                   <div className="empty-cart">Cart is empty</div>
@@ -1690,6 +1658,9 @@ const BillingPOS = () => {
                 )}
               </div>
 
+              </div>
+
+              {/* ── 2. Discount + Bill Summary ── */}
               {cart.length > 0 && (
                 <>
                   <div className="discount-section">
@@ -1744,7 +1715,25 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
-                  {/* Loyalty Points Section */}
+                  {/* ── 3. Customer Details ── */}
+                  <div className="customer-inputs">
+                    <input
+                      data-testid="customer-name-input"
+                      className="input"
+                      placeholder="Customer Name (optional)"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                    />
+                    <input
+                      data-testid="customer-phone-input"
+                      className="input"
+                      placeholder="Customer Phone (optional)"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                    />
+                  </div>
+
+                  {/* ── 4. Loyalty Points ── */}
                   {customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled && (
                     <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)' }}>
                       <div className="section-label" style={{ color: 'var(--accent)' }}>
@@ -1768,6 +1757,7 @@ const BillingPOS = () => {
                     </div>
                   )}
 
+                  {/* ── 5. Payment Method ── */}
                   <div className="payment-section">
                     <div className="section-label">Payment Method:</div>
                     <div className="payment-methods">
@@ -1784,12 +1774,13 @@ const BillingPOS = () => {
                     </div>
                   </div>
 
+                  {/* ── 6. Amount Paid ── */}
                   <div className="cash-section">
-                    <div className="section-label">Customer Paid Amount:</div>
+                    <div className="section-label">Amount Paid (leave blank = full payment):</div>
                     <input
                       data-testid="customer-paid-input"
                       className="input"
-                      placeholder="Enter amount paid by customer"
+                      placeholder="Enter amount paid"
                       type="number"
                       value={customerPaid}
                       onChange={(e) => setCustomerPaid(e.target.value)}
@@ -1805,6 +1796,7 @@ const BillingPOS = () => {
                     })()}
                   </div>
 
+                  {/* ── 7. Actions ── */}
                   <div className="cart-actions">
                     <button
                       data-testid="hold-cart-btn"
