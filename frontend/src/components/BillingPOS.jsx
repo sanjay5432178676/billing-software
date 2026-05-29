@@ -792,9 +792,6 @@ const BillingPOS = () => {
         try { await axios.post(`${API}/loyalty/earn`, null, { params: { customer_phone: earnPhone, customer_name: earnName, bill_total: effectiveTotal, invoice_no: invoiceNo } }); } catch(e) {}
       }
 
-      // WhatsApp auto-send only if customer has phone (separate from auto_print)
-      // Do NOT auto-send on every bill - only manual via bill history
-
       setCart([]);
       setDiscountPercent(0);
       setCustomDiscount('');
@@ -1146,7 +1143,6 @@ const BillingPOS = () => {
     const w = parseInt(thermalWidth);
     const font = parseInt(thermalFont);
     const shopName = settings.shop_name || 'My Shop';
-    const sep = '-'.repeat(w === 58 ? 32 : 48);
     const win = window.open('', '_blank', 'width=400,height=700');
     if (!win) { showNotification('Allow popups to print receipts', 'error'); return; }
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -1558,8 +1554,6 @@ const BillingPOS = () => {
                   );
                 })}
               </div>
-
-              {/* Checkout anchor - visible after scrolling past all products */}
             </div>
 
             <div style={{ width:380, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', overflowY:'auto', overflowX:'hidden', padding:20, height:'100%' }}>
@@ -1656,8 +1650,6 @@ const BillingPOS = () => {
                     </div>
                   ))
                 )}
-              </div>
-
               </div>
 
               {/* ── 2. Discount + Bill Summary ── */}
@@ -1816,6 +1808,7 @@ const BillingPOS = () => {
                 </>
               )}
             </div>
+          </div>
         )}
 
         {/* Low Stock View */}
@@ -2998,7 +2991,7 @@ const BillingPOS = () => {
                 <div className="form-group">
                   <label>Category *</label>
                   <select className="input" value={expenseForm.category} onChange={e => setExpenseForm({ ...expenseForm, category: e.target.value })}>
-                    {(typeof EXPENSE_CATEGORIES !== 'undefined' ? [] : []).concat(['Rent','Electricity','Salary','Purchase','Transport','Maintenance','Other']).filter((v,i,a)=>a.indexOf(v)===i).map(c => <option key={c} value={c}>{c}</option>)}
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
@@ -4014,7 +4007,6 @@ const BillingPOS = () => {
           </div>
         </div>
       )}
-
 
       {/* Notification */}
       {notification && (
