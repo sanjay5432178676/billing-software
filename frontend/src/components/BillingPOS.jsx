@@ -332,7 +332,7 @@ const BillingPOS = () => {
     } catch (error) {
       showNotification('Error fetching day close report', 'error');
       setDayCloseData(null);
-    } fillal {
+    } finally {
       setDayCloseLoading(false);
     }
   };
@@ -557,7 +557,7 @@ const BillingPOS = () => {
       }
     } catch (e) {
       showNotification('Error searching bill', 'error');
-    } fillal {
+    } finally {
       setReturnLoading(false);
     }
   };
@@ -3399,7 +3399,7 @@ const BillingPOS = () => {
                     </div>
                   ))}
                   {poForm.items.length > 0 && (
-                    <div style={{ textAlign: 'right', marginTop: 8, fontSize: 16, fontWeight: 'bold' }}>
+                    <div style={{ textAlign: 'right', marginTop: 8, fontSize: 16, fontfamily: 'bold' }}>
                       Total: ₹{poForm.items.reduce((s, i) => s + i.total_cost, 0).toFixed(2)}
                     </div>
                   )}
