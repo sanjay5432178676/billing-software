@@ -34,6 +34,7 @@ const VIEWS = {
   BARCODE_LABELS: 'barcode_labels',
   TAX_GST: 'tax_gst',
   HOLD_BILLS: 'hold_bills',
+  OUT_OF_STOCK: 'out_of_stock',
 };
 
 const TAX_RATES = [0, 5, 12, 18, 28];
@@ -1733,7 +1734,8 @@ const BillingPOS = () => {
     return matchesCategory && matchesSearch;
   });
 
-  const lowStockProducts = (Array.isArray(products) ? products : []).filter(p => p.stock <= settings.low_stock_threshold && p.stock > 0);
+  const lowStockProducts = (Array.isArray(products) ? products : []).filter(p => p.stock > 0 && p.stock <= settings.low_stock_threshold);
+  const outOfStockProducts = (Array.isArray(products) ? products : []).filter(p => p.stock === 0);
   const balanceCustomers = (Array.isArray(customers) ? customers : []).filter(c => (c.balance || 0) > 0);
 
   return (
@@ -1797,6 +1799,25 @@ const BillingPOS = () => {
               ))}
               {lowStockProducts.length > 3 && (
                 <div className="alert-more">+{lowStockProducts.length - 3} more (click to view)</div>
+              )}
+            </div>
+          </div>
+        )}
+        {outOfStockProducts.length > 0 && (
+          <div
+            className="low-stock-alert clickable"
+            style={{ background: 'rgba(211,47,47,0.12)', borderLeft: '3px solid var(--danger)' }}
+            onClick={() => { setView(VIEWS.OUT_OF_STOCK); setSidebarOpen(false); }}
+          >
+            <div className="alert-header" style={{ color: 'var(--danger)' }}>🚫 OUT OF STOCK ({outOfStockProducts.length})</div>
+            <div className="alert-content">
+              {outOfStockProducts.slice(0, 3).map(p => (
+                <div key={p.id} className="alert-item" style={{ color: 'var(--danger)' }}>
+                  {p.name}
+                </div>
+              ))}
+              {outOfStockProducts.length > 3 && (
+                <div className="alert-more">+{outOfStockProducts.length - 3} more (click to view)</div>
               )}
             </div>
           </div>
@@ -2266,6 +2287,108 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Out of Stock Page */}
+        {view === VIEWS.OUT_OF_STOCK && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🚫 Out of Stock Products ({outOfStockProducts.length})</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-primary" onClick={() => exportToExcel(
+                  outOfStockProducts.map(p => ({
+                    'Name': p.name,
+                    'Category': p.category,
+                    'Stock': 0,
+                    'Price': p.price,
+                    'Barcode': p.barcode,
+                    'Unit': p.unit,
+                    'HSN': p.hsn_code,
+                    'GST Rate (%)': p.tax_percent !== undefined ? p.tax_percent : settings.tax_percent
+                  })), 'out-of-stock-products'
+                )}>📊 Export Excel</button>
+                <button className="btn btn-primary" onClick={() => setView(VIEWS.STOCK_ADJUSTMENTS)}>➕ Restock</button>
+              </div>
+            </div>
+
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Total Out of Stock</div>
+                <div className="stat-value" style={{ color: 'var(--danger)' }}>{outOfStockProducts.length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Categories Affected</div>
+                <div className="stat-value">{[...new Set(outOfStockProducts.map(p => p.category))].length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Est. Revenue at Risk</div>
+                <div className="stat-value" style={{ color: 'var(--danger)' }}>
+                  {formatCurrency(outOfStockProducts.reduce((s, p) => s + p.price, 0))}
+                </div>
+              </div>
+            </div>
+
+            {outOfStockProducts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                <div style={{ fontSize: 16 }}>All products are in stock!</div>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Product Name</th>
+                      <th>Category</th>
+                      <th>Barcode</th>
+                      <th>Price</th>
+                      <th>HSN</th>
+                      <th>GST</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {outOfStockProducts.map((p, idx) => (
+                      <tr key={p.id}>
+                        <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{idx + 1}</td>
+                        <td><strong>{p.name}</strong></td>
+                        <td>
+                          <span className="tag" style={{ background: getCategoryColor(p.category), color: '#fff', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>
+                            {p.category}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.barcode}</td>
+                        <td className="amount-text">{formatCurrency(p.price)}</td>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.hsn_code || '—'}</td>
+                        <td>
+                          <span style={{ background: 'var(--primary)', color: '#fff', padding: '2px 7px', borderRadius: 10, fontSize: 11 }}>
+                            {p.tax_percent !== undefined ? p.tax_percent : settings.tax_percent}%
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ background: 'var(--danger)', color: '#fff', padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+                            🚫 Out of Stock
+                          </span>
+                        </td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-sm" onClick={() => setEditProduct(p)}>✏️ Edit</button>
+                            <button className="btn btn-sm btn-primary" onClick={() => {
+                              setAdjProduct(p.id);
+                              setAdjType('add');
+                              setView(VIEWS.STOCK_ADJUSTMENTS);
+                            }}>➕ Restock</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Low Stock Dashboard Panel */}
         {view === VIEWS.LOW_STOCK && (
           <div className="content-view">
@@ -2290,11 +2413,12 @@ const BillingPOS = () => {
                 <div className="stat-label">Total Low Stock Items</div>
                 <div className="stat-value balance-text">{lowStockProducts.length}</div>
               </div>
-              <div className="stat-card">
+              <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.OUT_OF_STOCK)}>
                 <div className="stat-label">Out of Stock Items</div>
                 <div className="stat-value" style={{ color: 'var(--danger)' }}>
-                  {products.filter(p => p.stock === 0).length}
+                  {outOfStockProducts.length}
                 </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Click to view →</div>
               </div>
               <div className="stat-card">
                 <div className="stat-label">Threshold</div>
@@ -2317,7 +2441,7 @@ const BillingPOS = () => {
                       <th>Current Stock</th>
                       <th>Price</th>
                       <th>Barcode</th>
-                      <th>Action</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2329,16 +2453,22 @@ const BillingPOS = () => {
                             {p.category}
                           </span>
                         </td>
-                        <td className="balance-text">{p.stock} {p.unit}</td>
-                        <td>{formatCurrency(p.price)}</td>
-                        <td>{p.barcode}</td>
                         <td>
-                          <button
-                            className="btn btn-sm btn-primary"
-                            onClick={() => setEditProduct(p)}
-                          >
-                            Restock
-                          </button>
+                          <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{p.stock}</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}> {p.unit}</span>
+                        </td>
+                        <td>{formatCurrency(p.price)}</td>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.barcode}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-sm" onClick={() => setEditProduct(p)}>✏️ Edit</button>
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => { setAdjProduct(p.id); setAdjType('add'); setView(VIEWS.STOCK_ADJUSTMENTS); }}
+                            >
+                              ➕ Restock
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -3053,8 +3183,13 @@ const BillingPOS = () => {
                   </div>
                   <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setView(VIEWS.LOW_STOCK)}>
                     <div className="stat-label">Low Stock Items</div>
-                    <div className="stat-value" style={{ color: dashData.lowStockCount > 0 ? 'var(--warning)' : 'var(--success)' }}>{dashData.lowStockCount}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: 4 }}>{dashData.outOfStock} out of stock</div>
+                    <div className="stat-value" style={{ color: dashData.lowStockCount > 0 ? 'var(--warning)' : 'var(--success)' }}>{lowStockProducts.length}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: 4 }}>Stock ≤ {settings.low_stock_threshold} (click to view)</div>
+                  </div>
+                  <div className="stat-card" style={{ cursor: 'pointer', borderColor: outOfStockProducts.length > 0 ? 'var(--danger)' : undefined }} onClick={() => setView(VIEWS.OUT_OF_STOCK)}>
+                    <div className="stat-label">Out of Stock</div>
+                    <div className="stat-value" style={{ color: outOfStockProducts.length > 0 ? 'var(--danger)' : 'var(--success)' }}>{outOfStockProducts.length}</div>
+                    <div style={{ fontSize: '12px', color: outOfStockProducts.length > 0 ? 'var(--danger)' : 'var(--text-muted)', marginTop: 4 }}>{outOfStockProducts.length > 0 ? 'Needs restocking!' : 'All in stock ✓'}</div>
                   </div>
                 </div>
 
@@ -3108,11 +3243,11 @@ const BillingPOS = () => {
                     </div>
                     <div className="report-item">
                       <span>Low Stock</span>
-                      <span className="report-value" style={{ color: 'var(--warning)' }}>{dashData.lowStockCount} items</span>
+                      <span className="report-value" style={{ color: 'var(--warning)' }}>{lowStockProducts.length} items</span>
                     </div>
                     <div className="report-item">
                       <span>Out of Stock</span>
-                      <span className="report-value" style={{ color: 'var(--danger)' }}>{dashData.outOfStock} items</span>
+                      <span className="report-value" style={{ color: outOfStockProducts.length > 0 ? 'var(--danger)' : 'var(--success)' }}>{outOfStockProducts.length} items</span>
                     </div>
                     <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setView(VIEWS.INVENTORY)}>View Inventory →</button>
                   </div>
