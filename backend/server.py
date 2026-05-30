@@ -31,6 +31,7 @@ class Product(BaseModel):
     barcode: str
     unit: str = "pcs"
     hsn_code: str = ""
+    tax_percent: float = 18.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ProductCreate(BaseModel):
@@ -41,6 +42,7 @@ class ProductCreate(BaseModel):
     barcode: str
     unit: str = "pcs"
     hsn_code: str = ""
+    tax_percent: float = 18.0
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -50,6 +52,7 @@ class ProductUpdate(BaseModel):
     barcode: Optional[str] = None
     unit: Optional[str] = None
     hsn_code: Optional[str] = None
+    tax_percent: Optional[float] = None
 
 class CartItem(BaseModel):
     product_id: str
@@ -57,6 +60,7 @@ class CartItem(BaseModel):
     price: float
     quantity: int
     hsn_code: str = ""
+    tax_percent: float = 18.0
 
 class HeldCart(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -82,6 +86,7 @@ class BillItem(BaseModel):
     price: float
     quantity: int
     hsn_code: str = ""
+    tax_percent: float = 18.0
 
 class Bill(BaseModel):
     model_config = ConfigDict(extra="ignore")
