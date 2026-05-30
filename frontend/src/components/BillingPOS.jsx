@@ -332,7 +332,7 @@ const BillingPOS = () => {
     } catch (error) {
       showNotification('Error fetching day close report', 'error');
       setDayCloseData(null);
-    } finally {
+    } fillal {
       setDayCloseLoading(false);
     }
   };
@@ -557,7 +557,7 @@ const BillingPOS = () => {
       }
     } catch (e) {
       showNotification('Error searching bill', 'error');
-    } finally {
+    } fillal {
       setReturnLoading(false);
     }
   };
@@ -663,7 +663,6 @@ const BillingPOS = () => {
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.product_id === product.id);
     if (existingItem) {
-      // Stock limit validation guardrail
       if (existingItem.quantity >= product.stock) {
         showNotification(`Cannot add more than available stock (${product.stock})`, 'error');
         return;
@@ -687,7 +686,6 @@ const BillingPOS = () => {
       return;
     }
     
-    // Locate parent master store product info to guard programmatic entry edits
     const activeProd = products.find(p => p.id === productId);
     if (activeProd && newQty > activeProd.stock) {
       showNotification(`Requested quantity exceeds available inventory limits (${activeProd.stock})`, 'error');
@@ -1387,7 +1385,7 @@ const BillingPOS = () => {
 
   return (
     <div className="pos-container">
-      {/* Sidebar */}
+      {/* Sidebar Navigation Panel */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h1 className="logo">{settings.software_name || 'POS'}</h1>
@@ -1469,17 +1467,17 @@ const BillingPOS = () => {
 
       <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>☰</button>
 
-      {/* Main Content Wrapper */}
+      {/* Main Container Viewport calculation */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
         
-        {/* POS View Mode */}
+        {/* POS View Mode Layout Mapping */}
         {view === VIEWS.POS && (
           <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'calc(100vh - 4rem)' }}>
             
-            {/* LEFT COLUMN: Dedicated Product Showcase (Uniform size grid with scroll control) */}
+            {/* LEFT SIDE: Clean Showcase Product Terminal Layout Grid */}
             <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', padding:20, background:'var(--bg-primary)' }}>
               
-              {/* Top Search Operations */}
+              {/* Product Filtering and Barcode Scanner Controls */}
               <div className="search-bar" style={{ flexShrink: 0 }}>
                 <input
                   data-testid="barcode-input"
@@ -1499,7 +1497,7 @@ const BillingPOS = () => {
                 />
               </div>
 
-              {/* Categorization Menu Filters */}
+              {/* Category Filter Pills */}
               <div className="category-filters" style={{ flexShrink: 0, margin: '12px 0' }}>
                 {CATEGORIES.map(cat => (
                   <button
@@ -1513,9 +1511,9 @@ const BillingPOS = () => {
                 ))}
               </div>
 
-              {/* Uniform-Size Grid System with independent scroll viewport bounds */}
+              {/* Uniform-Size Grid System Viewport with structural item add button rules */}
               <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 16 }}>
                   {filteredProducts.map(product => {
                     const stockStatus = getStockStatus(product.stock);
                     const isOutOfStock = product.stock === 0;
@@ -1527,19 +1525,19 @@ const BillingPOS = () => {
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
-                          justifyContent: 'between',
-                          height: 180,
+                          justifyContent: 'space-between',
+                          height: 185,
                           padding: 14,
                           borderRadius: 8,
                           border: '1px solid var(--border)',
                           background: 'var(--bg-secondary)',
-                          opacity: isOutOfStock ? 0.55 : 1,
+                          opacity: isOutOfStock ? 0.6 : 1,
                           transition: 'all 0.2s ease-in-out',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
                         }}
                         className="product-grid-box"
                       >
-                        {/* Upper Details Meta Section */}
+                        {/* Upper Metadata Context Container */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 4 }}>
                             <span className="tag" style={{ background: getCategoryColor(product.category), fontSize: 10, padding: '2px 6px', borderRadius: 4, color: '#fff', fontWeight: 600 }}>
@@ -1559,7 +1557,7 @@ const BillingPOS = () => {
                           </div>
                         </div>
 
-                        {/* Card pricing and one-by-one click additions interactive triggers */}
+                        {/* Inventory Details & One-by-One Billing Operations Trigger */}
                         <div style={{ marginTop: 8, flexShrink: 0 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                             <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
@@ -1576,7 +1574,7 @@ const BillingPOS = () => {
                             onClick={(e) => { e.stopPropagation(); addToCart(product); }}
                             style={{
                               width: '100%',
-                              padding: '6px 0',
+                              padding: '8px 0',
                               fontSize: 12,
                               fontWeight: 600,
                               borderRadius: 6,
@@ -1598,10 +1596,10 @@ const BillingPOS = () => {
               </div>
             </div>
 
-            {/* RIGHT COLUMN SIDEBAR: Checkout Summary Controls Panel (Remains entirely as it was) */}
+            {/* RIGHT SIDE: Current Checkout Sidebar Controls Summary Panel */}
             <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', height: '100%' }}>
               
-              {/* Header */}
+              {/* Sidebar Header Toolbar */}
               <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 10px 20px', flexShrink: 0 }}>
                 <span style={{ fontWeight: 'bold', fontSize: '16px' }}>Current Bill</span>
                 {cart.length > 0 && (
@@ -1628,7 +1626,7 @@ const BillingPOS = () => {
                 )}
               </div>
 
-              {/* Held Carts area */}
+              {/* Parked / Suspended Carts Widget */}
               {heldCarts.length > 0 && (
                 <div className="held-carts" style={{ padding: '0 20px 10px 20px', flexShrink: 0 }}>
                   <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
@@ -1645,7 +1643,7 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              {/* Scrollable Cart Items Window */}
+              {/* Added Line-items List View Area */}
               <div className="cart-items" style={{ flex: '1 1 auto', overflowY: 'auto', padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
                 {cart.length === 0 ? (
                   <div className="empty-cart">Cart is empty</div>
@@ -1698,7 +1696,7 @@ const BillingPOS = () => {
                 )}
               </div>
 
-              {/* Checkout Controls Footer Section */}
+              {/* Grand Pricing & Financial Computation Footer */}
               {cart.length > 0 && (
                 <div style={{ flexShrink: 0, padding: 20, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
                   
@@ -1855,7 +1853,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Low Stock View */}
+        {/* Low Stock Dashboard Panel */}
         {view === VIEWS.LOW_STOCK && (
           <div className="content-view">
             <div className="view-header">
@@ -1937,7 +1935,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Inventory View */}
+        {/* Master Inventory View */}
         {view === VIEWS.INVENTORY && (
           <div className="content-view">
             <div className="view-header">
@@ -2073,7 +2071,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Bills View */}
+        {/* Ledger Bill History Archive */}
         {view === VIEWS.BILLS && (
           <div className="content-view">
             <div className="view-header">
@@ -2175,7 +2173,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Customers View */}
+        {/* Customer Accounts Tracker */}
         {view === VIEWS.CUSTOMERS && (
           <div className="content-view">
             <div className="view-header">
@@ -2248,7 +2246,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Balance View */}
+        {/* Pending Ledger Credit Balance View */}
         {view === VIEWS.BALANCE && (
           <div className="content-view">
             <div className="view-header">
@@ -2343,7 +2341,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Reports View */}
+        {/* Advanced Multi-period Performance Reports */}
         {view === VIEWS.REPORTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2436,7 +2434,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Day Close View */}
+        {/* Day Close Terminal Verification Report */}
         {view === VIEWS.DAY_CLOSE && (
           <div className="content-view">
             <div className="view-header">
@@ -2578,7 +2576,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Dashboard View */}
+        {/* Executive Management Store Dashboard View */}
         {view === VIEWS.DASHBOARD && (
           <div className="content-view">
             <div className="view-header">
@@ -2688,7 +2686,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Stock Adjustments View */}
+        {/* Stock Log Adjustments Engine */}
         {view === VIEWS.STOCK_ADJUSTMENTS && (
           <div className="content-view">
             <div className="view-header">
@@ -2782,7 +2780,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Quotations View */}
+        {/* Quotations Pipeline Interface */}
         {view === VIEWS.QUOTATIONS && (
           <div className="content-view">
             <div className="view-header">
@@ -2903,7 +2901,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Returns View */}
+        {/* Product Returns View */}
         {view === VIEWS.RETURNS && (
           <div className="content-view">
             <div className="view-header">
@@ -2990,7 +2988,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Expenses View */}
+        {/* Expenses Tracking Module */}
         {view === VIEWS.EXPENSES && (
           <div className="content-view">
             <div className="view-header">
@@ -3093,7 +3091,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* Settings View */}
+        {/* Settings View Configuration Panel */}
         {view === VIEWS.SETTINGS && (
           <div className="content-view">
             <div className="view-header">
@@ -3227,7 +3225,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* ANALYTICS VIEW */}
+        {/* Financial Analytics & Profit and Loss Ledger */}
         {view === VIEWS.ANALYTICS && (
           <div className="content-view">
             <div className="view-header">
@@ -3295,7 +3293,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* SUPPLIERS VIEW */}
+        {/* Suppliers Registry Panel */}
         {view === VIEWS.SUPPLIERS && (
           <div className="content-view">
             <div className="view-header"><h2 className="section-title">🏭 Supplier Management</h2></div>
@@ -3342,7 +3340,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* PURCHASE ORDERS VIEW */}
+        {/* Supply Chain Purchase Orders Manager */}
         {view === VIEWS.PURCHASE_ORDERS && (
           <div className="content-view">
             <div className="view-header">
@@ -3440,7 +3438,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* BRANCHES & USERS VIEW */}
+        {/* Multi-Branch & Identity Access User Management */}
         {view === VIEWS.BRANCHES && (
           <div className="content-view">
             <div className="view-header">
@@ -3549,7 +3547,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* LOYALTY POINTS VIEW */}
+        {/* Customer Loyalty Points Engine */}
         {view === VIEWS.LOYALTY && (
           <div className="content-view">
             <div className="view-header"><h2 className="section-title">⭐ Loyalty Points Program</h2></div>
@@ -3623,7 +3621,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* BARCODE LABELS VIEW */}
+        {/* Barcode Print Label Sheet Configuration */}
         {view === VIEWS.BARCODE_LABELS && (
           <div className="content-view">
             <div className="view-header">
@@ -3672,7 +3670,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* STAFF LOGIN MODAL */}
+        {/* Staff Authentication Pin Modal */}
         {showLoginModal && (
           <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
@@ -3692,7 +3690,7 @@ const BillingPOS = () => {
 
       </div>
 
-      {/* Receipt Modal */}
+      {/* Invoice Receipt Modal Overlay */}
       {showReceipt && (
         <div className="modal-overlay" onClick={() => setShowReceipt(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="receipt-modal">
@@ -3805,7 +3803,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Product Modal */}
+      {/* Edit Inventory Product Info Modal Context */}
       {editProduct && (
         <div className="modal-overlay" onClick={() => setEditProduct(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="edit-product-modal">
@@ -3878,7 +3876,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Customer History Modal */}
+      {/* Customer Purchase History Analysis Overlay */}
       {customerHistory && (
         <div className="modal-overlay" onClick={() => setCustomerHistory(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900 }} data-testid="customer-history-modal">
@@ -3962,7 +3960,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Edit Customer Modal */}
+      {/* Edit Customer Profile Info Modal Summary Box */}
       {editingCustomer && (
         <div className="modal-overlay" onClick={() => setEditingCustomer(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }} data-testid="edit-balance-modal">
@@ -3993,7 +3991,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Quotation Modal */}
+      {/* Print Preview Quotation sheet modal */}
       {showQuotation && (
         <div className="modal-overlay" onClick={() => setShowQuotation(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -4042,7 +4040,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Notification Toast overlay context */}
+      {/* Global Live Action Toast notifications stack */}
       {notification && (
         <div
           className={`notification ${notification.type}`}
