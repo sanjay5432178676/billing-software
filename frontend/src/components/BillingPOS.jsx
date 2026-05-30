@@ -1472,13 +1472,13 @@ const BillingPOS = () => {
         
         {/* POS View Mode Layout Mapping */}
         {view === VIEWS.POS && (
-          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'calc(100vh - 4rem)' }}>
-            
-            {/* LEFT SIDE: Clean Showcase Product Terminal Layout Grid */}
-            <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', padding:20, background:'var(--bg-primary)' }}>
+          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
+
+            {/* ═══ MIDDLE: Products + Cart Items ═══ */}
+            <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg-primary)' }}>
               
               {/* Product Filtering and Barcode Scanner Controls */}
-              <div className="search-bar" style={{ flexShrink: 0 }}>
+              <div className="search-bar" style={{ flexShrink:0, padding:'12px 16px 0 16px' }}>
                 <input
                   data-testid="barcode-input"
                   ref={barcodeRef}
@@ -1498,7 +1498,7 @@ const BillingPOS = () => {
               </div>
 
               {/* Category Filter Pills */}
-              <div className="category-filters" style={{ flexShrink: 0, margin: '12px 0' }}>
+              <div className="category-filters" style={{ flexShrink:0, margin:'8px 16px', flexWrap:'wrap' }}>
                 {CATEGORIES.map(cat => (
                   <button
                     key={cat}
@@ -1511,9 +1511,9 @@ const BillingPOS = () => {
                 ))}
               </div>
 
-              {/* Uniform-Size Grid System Viewport with structural item add button rules */}
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 16 }}>
+              {/* Product Grid - 3 columns */}
+              <div style={{ flex:1, overflowY:'auto', padding:'0 16px 8px 16px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:10 }}>
                   {filteredProducts.map(product => {
                     const stockStatus = getStockStatus(product.stock);
                     const isOutOfStock = product.stock === 0;
@@ -1596,260 +1596,176 @@ const BillingPOS = () => {
               </div>
             </div>
 
-            {/* RIGHT SIDE: Current Checkout Sidebar Controls Summary Panel */}
-            <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', height: '100%' }}>
-              
-              {/* Sidebar Header Toolbar */}
-              <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 10px 20px', flexShrink: 0 }}>
-                <span style={{ fontWeight: 'bold', fontSize: '16px' }}>Current Bill</span>
+            {/* ═══ CART ITEMS COLUMN ═══ */}
+            <div style={{ width:290, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'1px solid var(--border)', height:'100%', overflow:'hidden' }}>
+              <div style={{ padding:'10px 12px', borderBottom:'2px solid var(--accent)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+                <span style={{ fontWeight:'bold', fontSize:13, color:'var(--accent)' }}>🛒 Cart ({cart.reduce((s,i)=>s+i.quantity,0)})</span>
                 {cart.length > 0 && (
-                  <button
-                    className="btn btn-sm btn-danger"
-                    style={{ fontSize: 12, padding: '4px 12px' }}
-                    onClick={() => {
-                      if (window.confirm('Clear all items from this bill?')) {
-                        setCart([]);
-                        setDiscountPercent(0);
-                        setCustomDiscount('');
-                        setCustomerPaid('');
-                        setCustomerName('');
-                        setCustomerPhone('');
-                        setLoyaltyDiscount(0);
-                        setRedeemPoints('');
-                        setLoyaltyInfo(null);
-                        showNotification('Bill cleared', 'success');
-                      }
-                    }}
-                  >
-                    🗑️ Clear Bill
+                  <button className="btn btn-sm btn-danger" style={{ fontSize:11, padding:'2px 8px' }}
+                    onClick={() => { if(window.confirm('Clear bill?')){ setCart([]); setDiscountPercent(0); setCustomDiscount(''); setCustomerPaid(''); setCustomerName(''); setCustomerPhone(''); setLoyaltyDiscount(0); setRedeemPoints(''); setLoyaltyInfo(null); showNotification('Bill cleared','success'); } }}>
+                    Clear
                   </button>
                 )}
               </div>
-
-              {/* Parked / Suspended Carts Widget */}
               {heldCarts.length > 0 && (
-                <div className="held-carts" style={{ padding: '0 20px 10px 20px', flexShrink: 0 }}>
-                  <div className="held-carts-header">HELD CARTS ({heldCarts.length})</div>
+                <div style={{ padding:'6px 12px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+                  <div style={{ fontSize:10, fontWeight:'bold', color:'var(--accent)', marginBottom:3 }}>HELD ({heldCarts.length})</div>
                   {heldCarts.map(hc => (
-                    <button
-                      key={hc.id}
-                      data-testid={`resume-cart-${hc.id}`}
-                      className="btn held-cart-btn"
-                      onClick={() => handleResumeCart(hc)}
-                    >
+                    <button key={hc.id} data-testid={`resume-cart-${hc.id}`} className="btn held-cart-btn" onClick={() => handleResumeCart(hc)}>
                       {hc.customer_name || 'Unnamed'} - {hc.items.length} items
                     </button>
                   ))}
                 </div>
               )}
-
-              {/* Added Line-items List View Area */}
-              <div className="cart-items" style={{ flex: '1 1 auto', overflowY: 'auto', padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ flex:1, overflowY:'auto', padding:'8px 10px' }}>
                 {cart.length === 0 ? (
-                  <div className="empty-cart">Cart is empty</div>
-                ) : (
-                  [...cart]
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map(item => (
-                      <div key={item.product_id} className="cart-item" data-testid={`cart-item-${item.product_id}`}>
-                        <div className="cart-item-header">
-                          <span className="cart-item-name">{item.name}</span>
-                          <button
-                            data-testid={`remove-item-${item.product_id}`}
-                            className="btn btn-danger btn-sm"
-                            onClick={() => removeFromCart(item.product_id)}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        <div className="cart-item-controls">
-                          <div className="qty-controls">
-                            <button
-                              data-testid={`decrease-qty-${item.product_id}`}
-                              className="btn btn-sm"
-                              onClick={() => updateQuantity(item.product_id, item.quantity - 1)}
-                            >
-                              −
-                            </button>
-                            <input
-                              data-testid={`qty-input-${item.product_id}`}
-                              className="input qty-input"
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value) || 1)}
-                            />
-                            <button
-                              data-testid={`increase-qty-${item.product_id}`}
-                              className="btn btn-sm"
-                              onClick={() => updateQuantity(item.product_id, item.quantity + 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                          <span className="cart-item-total">{formatCurrency(item.price * item.quantity)}</span>
-                        </div>
-                        <div className="cart-item-detail">
-                          {formatCurrency(item.price)} × {item.quantity}
-                        </div>
-                      </div>
-                    ))
-                )}
-              </div>
-
-              {/* Grand Pricing & Financial Computation Footer */}
-              {cart.length > 0 && (
-                <div style={{ flexShrink: 0, padding: 20, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
-                  
-                  <div className="discount-section">
-                    <div className="section-label">Discount:</div>
-                    <div className="discount-options">
-                      {DISCOUNT_OPTIONS.map(disc => (
-                        <button
-                          key={disc}
-                          data-testid={`discount-${disc}`}
-                          className={`btn btn-sm ${discountPercent === disc && !customDiscount ? 'active' : ''}`}
-                          onClick={() => { setDiscountPercent(disc); setCustomDiscount(''); }}
-                        >
-                          {disc}%
-                        </button>
-                      ))}
+                  <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'24px 8px', fontSize:12 }}>Empty cart</div>
+                ) : cart.map(item => (
+                  <div key={item.product_id} data-testid={`cart-item-${item.product_id}`}
+                    style={{ background:'var(--bg-tertiary)', border:'1px solid var(--border)', borderRadius:6, padding:'8px', marginBottom:7 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                      <span style={{ fontWeight:600, fontSize:12, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
+                      <button data-testid={`remove-item-${item.product_id}`}
+                        style={{ background:'var(--danger)', color:'#fff', border:'none', borderRadius:3, width:18, height:18, fontSize:10, cursor:'pointer', flexShrink:0, marginLeft:4 }}
+                        onClick={() => removeFromCart(item.product_id)}>✕</button>
                     </div>
-                    <input
-                      data-testid="custom-discount-input"
-                      className="input"
-                      placeholder="Custom discount %"
-                      type="number"
-                      value={customDiscount}
-                      onChange={(e) => { setCustomDiscount(e.target.value); setDiscountPercent(0); }}
-                    />
-                  </div>
-
-                  <div className="bill-summary">
-                    {(() => {
-                      const { subtotal, discountAmount, taxAmount, total } = calculateBill();
-                      return (
-                        <>
-                          <div className="summary-line">
-                            <span>Subtotal:</span>
-                            <span data-testid="subtotal">{formatCurrency(subtotal)}</span>
-                          </div>
-                          <div className="summary-line">
-                            <span>Discount:</span>
-                            <span data-testid="discount" className="discount-text">- {formatCurrency(discountAmount)}</span>
-                          </div>
-                          {settings.tax_enabled && (
-                            <div className="summary-line">
-                              <span>GST ({settings.tax_percent}%):</span>
-                              <span data-testid="tax">{formatCurrency(taxAmount)}</span>
-                            </div>
-                          )}
-                          <div className="summary-line total-line">
-                            <span>Total:</span>
-                            <span data-testid="total">{formatCurrency(total - loyaltyDiscount)}</span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="customer-inputs">
-                    <input
-                      data-testid="customer-name-input"
-                      className="input"
-                      placeholder="Customer Name (optional)"
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                    />
-                    <input
-                      data-testid="customer-phone-input"
-                      className="input"
-                      placeholder="Customer Phone (optional)"
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                    />
-                  </div>
-
-                  {customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled && (
-                    <div className="payment-section" style={{ border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg-tertiary)', marginBottom: 12 }}>
-                      <div className="section-label" style={{ color: 'var(--accent)' }}>
-                        ⭐ Loyalty Points: {loyaltyInfo ? loyaltyInfo.points : 0} pts
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                        <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity-1)}>−</button>
+                        <input className="input qty-input" type="number" value={item.quantity}
+                          onChange={e => updateQuantity(item.product_id, parseInt(e.target.value)||1)}
+                          style={{ width:40, textAlign:'center', padding:'2px', fontSize:12 }} />
+                        <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity+1)}>+</button>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                        Min redeem: {loyaltySettings.min_redeem_points} pts | 1 pt = ₹{loyaltySettings.rupees_per_point}
+                      <span style={{ color:'var(--accent)', fontWeight:'bold', fontSize:12 }}>{formatCurrency(item.price*item.quantity)}</span>
+                    </div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>₹{item.price} × {item.quantity}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ═══ BILLING SUMMARY COLUMN ═══ */}
+            <div style={{ width:270, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', height:'100%', overflowY:'auto', overflowX:'hidden' }}>
+              <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+                <span style={{ fontWeight:'bold', fontSize:13, color:'var(--accent)' }}>Current Bill</span>
+              </div>
+              <div style={{ padding:'10px 14px', display:'flex', flexDirection:'column', gap:10, flex:1 }}>
+
+                {/* Discount */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>DISCOUNT</div>
+                  <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
+                    {DISCOUNT_OPTIONS.map(disc => (
+                      <button key={disc} data-testid={`discount-${disc}`}
+                        className={`btn btn-sm ${discountPercent===disc && !customDiscount ? 'active' : ''}`}
+                        style={{ padding:'3px 8px', fontSize:11 }}
+                        onClick={() => { setDiscountPercent(disc); setCustomDiscount(''); }}>
+                        {disc}%
+                      </button>
+                    ))}
+                  </div>
+                  <input data-testid="custom-discount-input" className="input" placeholder="Custom %" type="number"
+                    value={customDiscount} style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => { setCustomDiscount(e.target.value); setDiscountPercent(0); }} />
+                </div>
+
+                {/* Bill Summary */}
+                {(() => {
+                  const { subtotal, discountAmount, taxAmount, total } = calculateBill();
+                  const netTotal = Math.max(0, total - loyaltyDiscount);
+                  return (
+                    <div style={{ background:'var(--bg-tertiary)', borderRadius:6, padding:'8px 10px' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                        <span style={{ color:'var(--text-secondary)' }}>Subtotal</span>
+                        <span data-testid="subtotal">{formatCurrency(subtotal)}</span>
                       </div>
-                      {loyaltyDiscount > 0 ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ color: 'var(--success)' }}>✓ ₹{loyaltyDiscount.toFixed(2)} discount applied ({redeemPoints} pts)</span>
-                          <button className="btn btn-sm" style={{ padding: '2px 8px' }} onClick={() => { setLoyaltyDiscount(0); setRedeemPoints(''); }}>✕</button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input className="input" placeholder="Points to redeem" type="number" style={{ flex: 1 }}
-                            value={redeemPoints} onChange={e => setRedeemPoints(e.target.value)} />
-                          <button className="btn btn-sm btn-primary" onClick={handleRedeemLoyalty}>Redeem</button>
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                        <span style={{ color:'var(--text-secondary)' }}>Discount</span>
+                        <span data-testid="discount" style={{ color:'var(--success)' }}>−{formatCurrency(discountAmount)}</span>
+                      </div>
+                      {settings.tax_enabled && (
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                          <span style={{ color:'var(--text-secondary)' }}>GST ({settings.tax_percent}%)</span>
+                          <span data-testid="tax">{formatCurrency(taxAmount)}</span>
                         </div>
                       )}
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0 2px', fontSize:15, fontWeight:'bold', borderTop:'2px solid var(--accent)', marginTop:4 }}>
+                        <span style={{ color:'var(--accent)' }}>Total</span>
+                        <span data-testid="total" style={{ color:'var(--accent)' }}>{formatCurrency(netTotal)}</span>
+                      </div>
                     </div>
-                  )}
+                  );
+                })()}
 
-                  <div className="payment-section">
-                    <div className="section-label">Payment Method:</div>
-                    <div className="payment-methods">
-                      {PAYMENT_METHODS.map(method => (
-                        <button
-                          key={method}
-                          data-testid={`payment-${method.toLowerCase()}`}
-                          className={`btn btn-sm ${paymentMethod === method ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod(method)}
-                        >
-                          {method}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="cash-section">
-                    <div className="section-label">Amount Paid (leave blank = full payment):</div>
-                    <input
-                      data-testid="customer-paid-input"
-                      className="input"
-                      placeholder="Enter amount paid"
-                      type="number"
-                      value={customerPaid}
-                      onChange={(e) => setCustomerPaid(e.target.value)}
-                    />
-                    {customerPaid && (() => {
-                      const { total } = calculateBill();
-                      const paid = parseFloat(customerPaid) || 0;
-                      const netTotal = Math.max(0, total - loyaltyDiscount);
-                      if (paid >= netTotal) {
-                        return <div className="change-info">Change: {formatCurrency(paid - netTotal)}</div>;
-                      } else {
-                        return <div className="balance-info balance-text">Balance Due: {formatCurrency(netTotal - paid)}</div>;
-                      }
-                    })()}
-                  </div>
-
-                  <div className="cart-actions">
-                    <button
-                      data-testid="hold-cart-btn"
-                      className="btn"
-                      onClick={handleHoldCart}
-                    >
-                      Hold
-                    </button>
-                    <button
-                      data-testid="checkout-btn"
-                      className="btn btn-primary"
-                      onClick={handleCheckout}
-                    >
-                      Checkout
-                    </button>
-                  </div>
-
+                {/* Customer */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>CUSTOMER</div>
+                  <input data-testid="customer-name-input" className="input" placeholder="Name" value={customerName}
+                    style={{ fontSize:12, padding:'5px 8px', marginBottom:5 }} onChange={e => setCustomerName(e.target.value)} />
+                  <input data-testid="customer-phone-input" className="input" placeholder="Phone" value={customerPhone}
+                    style={{ fontSize:12, padding:'5px 8px' }} onChange={e => setCustomerPhone(e.target.value)} />
                 </div>
-              )}
+
+                {/* Loyalty */}
+                {customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled && (
+                  <div style={{ border:'1px solid var(--accent)', borderRadius:5, padding:'7px 9px', background:'var(--bg-tertiary)', fontSize:11 }}>
+                    <div style={{ color:'var(--accent)', fontWeight:600, marginBottom:3 }}>⭐ {loyaltyInfo ? loyaltyInfo.points : 0} pts</div>
+                    {loyaltyDiscount > 0 ? (
+                      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                        <span style={{ color:'var(--success)', fontSize:10 }}>✓ ₹{loyaltyDiscount.toFixed(2)} applied</span>
+                        <button className="btn btn-sm" style={{ padding:'1px 5px', fontSize:10 }} onClick={() => { setLoyaltyDiscount(0); setRedeemPoints(''); }}>✕</button>
+                      </div>
+                    ) : (
+                      <div style={{ display:'flex', gap:5 }}>
+                        <input className="input" placeholder="Points" type="number" style={{ flex:1, fontSize:11, padding:'3px 6px' }}
+                          value={redeemPoints} onChange={e => setRedeemPoints(e.target.value)} />
+                        <button className="btn btn-sm btn-primary" style={{ fontSize:10, padding:'3px 7px' }} onClick={handleRedeemLoyalty}>Redeem</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Payment Method */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>PAYMENT METHOD</div>
+                  <div style={{ display:'flex', gap:3, flexWrap:'wrap' }}>
+                    {PAYMENT_METHODS.map(method => (
+                      <button key={method} data-testid={`payment-${method.toLowerCase()}`}
+                        className={`btn btn-sm ${paymentMethod===method ? 'active' : ''}`}
+                        style={{ padding:'4px 8px', fontSize:11 }}
+                        onClick={() => setPaymentMethod(method)}>
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Amount Paid / Balance */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>AMOUNT PAID</div>
+                  <input data-testid="customer-paid-input" className="input" placeholder="Blank = full payment"
+                    type="number" value={customerPaid} style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => setCustomerPaid(e.target.value)} />
+                  {customerPaid && (() => {
+                    const { total } = calculateBill();
+                    const paid = parseFloat(customerPaid)||0;
+                    const net = Math.max(0, total - loyaltyDiscount);
+                    return paid >= net
+                      ? <div style={{ color:'var(--success)', fontSize:11, marginTop:3 }}>Change: {formatCurrency(paid-net)}</div>
+                      : <div style={{ color:'var(--warning)', fontSize:11, marginTop:3, fontWeight:'bold' }}>Balance: {formatCurrency(net-paid)}</div>;
+                  })()}
+                </div>
+
+                {/* Hold + Checkout */}
+                <div style={{ display:'flex', gap:6, paddingTop:6, borderTop:'1px solid var(--border)' }}>
+                  <button data-testid="hold-cart-btn" className="btn" style={{ flex:1, fontSize:12 }} onClick={handleHoldCart}>Hold</button>
+                  <button data-testid="checkout-btn" className="btn btn-primary" style={{ flex:2, fontSize:13, fontWeight:'bold' }} onClick={handleCheckout}>Checkout</button>
+                </div>
+
+              </div>
             </div>
+
           </div>
         )}
 
