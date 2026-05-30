@@ -467,9 +467,15 @@ const BillingPOS = () => {
   const calculateQuotation = () => {
     const subtotal = quotCart.reduce((s, i) => s + i.price * i.quantity, 0);
     const discountAmount = subtotal * (quotDiscount / 100);
-    const taxable = subtotal - discountAmount;
-    const taxAmount = settings.tax_enabled ? taxable * (settings.tax_percent / 100) : 0;
-    const total = taxable + taxAmount;
+    const taxAmount = settings.tax_enabled
+      ? quotCart.reduce((s, i) => {
+          const taxRate = i.tax_percent !== undefined ? i.tax_percent : settings.tax_percent;
+          const lineTotal = i.price * i.quantity;
+          const discountedLine = lineTotal - lineTotal * (quotDiscount / 100);
+          return s + (discountedLine - discountedLine / (1 + taxRate / 100));
+        }, 0)
+      : 0;
+    const total = subtotal - discountAmount + taxAmount;
     return { subtotal, discountAmount, taxAmount, total };
   };
 
@@ -1898,16 +1904,18 @@ const BillingPOS = () => {
                       <div
                         key={product.id}
                         data-testid={`product-${product.barcode}`}
+                        onClick={() => !isOutOfStock && addToCart(product)}
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'space-between',
-                          height: 185,
+                          height: 160,
                           padding: 14,
                           borderRadius: 8,
                           border: '1px solid var(--border)',
                           background: 'var(--bg-secondary)',
                           opacity: isOutOfStock ? 0.6 : 1,
+                          cursor: isOutOfStock ? 'not-allowed' : 'pointer',
                           transition: 'all 0.2s ease-in-out',
                           boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
                         }}
@@ -1933,7 +1941,7 @@ const BillingPOS = () => {
                           </div>
                         </div>
 
-                        {/* Inventory Details & One-by-One Billing Operations Trigger */}
+                        {/* Price + GST */}
                         <div style={{ marginTop: 8, flexShrink: 0 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                             <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
@@ -1947,33 +1955,12 @@ const BillingPOS = () => {
                             const taxRate = product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent;
                             const taxAmt = product.price - (product.price / (1 + taxRate / 100));
                             return taxRate > 0 ? (
-                              <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 5, display: 'flex', gap: 4, alignItems: 'center' }}>
+                              <div style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'flex', gap: 4, alignItems: 'center' }}>
                                 <span style={{ background: 'var(--primary)', color: '#fff', padding: '1px 5px', borderRadius: 8, fontWeight: 600 }}>{taxRate}% GST</span>
                                 <span style={{ color: 'var(--text-muted)' }}>incl. ₹{taxAmt.toFixed(2)}</span>
                               </div>
                             ) : null;
                           })()}
-
-                          <button
-                            type="button"
-                            disabled={isOutOfStock}
-                            onClick={(e) => { e.stopPropagation(); addToCart(product); }}
-                            style={{
-                              width: '100%',
-                              padding: '8px 0',
-                              fontSize: 12,
-                              fontWeight: 600,
-                              borderRadius: 6,
-                              textAlign: 'center',
-                              cursor: isOutOfStock ? 'not-allowed' : 'pointer',
-                              background: isOutOfStock ? 'var(--border)' : 'var(--accent)',
-                              color: isOutOfStock ? 'var(--text-muted)' : '#fff',
-                              border: 'none',
-                              transition: 'opacity 0.15s ease'
-                            }}
-                          >
-                            {isOutOfStock ? 'Out of Stock' : '+ Add 1 Item'}
-                          </button>
                         </div>
                       </div>
                     );
@@ -2004,28 +1991,72 @@ const BillingPOS = () => {
               <div style={{ flex:1, overflowY:'auto', padding:'8px 10px' }}>
                 {cart.length === 0 ? (
                   <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'24px 8px', fontSize:12 }}>Empty cart</div>
-                ) : cart.map(item => (
-                  <div key={item.product_id} data-testid={`cart-item-${item.product_id}`}
-                    style={{ background:'var(--bg-tertiary)', border:'1px solid var(--border)', borderRadius:6, padding:'8px', marginBottom:7 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                      <span style={{ fontWeight:600, fontSize:12, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
-                      <button data-testid={`remove-item-${item.product_id}`}
-                        style={{ background:'var(--danger)', color:'#fff', border:'none', borderRadius:3, width:18, height:18, fontSize:10, cursor:'pointer', flexShrink:0, marginLeft:4 }}
-                        onClick={() => removeFromCart(item.product_id)}>✕</button>
-                    </div>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                        <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity-1)}>−</button>
-                        <input className="input qty-input" type="number" value={item.quantity}
-                          onChange={e => updateQuantity(item.product_id, parseInt(e.target.value)||1)}
-                          style={{ width:40, textAlign:'center', padding:'2px', fontSize:12 }} />
-                        <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity+1)}>+</button>
+                ) : cart.map(item => {
+                  const taxRate = item.tax_percent !== undefined ? item.tax_percent : settings.tax_percent;
+                  const lineTotal = item.price * item.quantity;
+                  const gstAmt = settings.tax_enabled && taxRate > 0
+                    ? lineTotal - (lineTotal / (1 + taxRate / 100))
+                    : 0;
+                  return (
+                    <div key={item.product_id} data-testid={`cart-item-${item.product_id}`}
+                      style={{ background:'var(--bg-tertiary)', border:'1px solid var(--border)', borderRadius:6, padding:'8px', marginBottom:7 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                        <span style={{ fontWeight:600, fontSize:12, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
+                        <button data-testid={`remove-item-${item.product_id}`}
+                          style={{ background:'var(--danger)', color:'#fff', border:'none', borderRadius:3, width:18, height:18, fontSize:10, cursor:'pointer', flexShrink:0, marginLeft:4 }}
+                          onClick={() => removeFromCart(item.product_id)}>✕</button>
                       </div>
-                      <span style={{ color:'var(--accent)', fontWeight:'bold', fontSize:12 }}>{formatCurrency(item.price*item.quantity)}</span>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                          <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity-1)}>−</button>
+                          <input className="input qty-input" type="number" value={item.quantity}
+                            onChange={e => updateQuantity(item.product_id, parseInt(e.target.value)||1)}
+                            style={{ width:40, textAlign:'center', padding:'2px', fontSize:12 }} />
+                          <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }} onClick={() => updateQuantity(item.product_id, item.quantity+1)}>+</button>
+                        </div>
+                        <span style={{ color:'var(--accent)', fontWeight:'bold', fontSize:13 }}>{formatCurrency(lineTotal)}</span>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:3 }}>
+                        <span style={{ fontSize:10, color:'var(--text-muted)' }}>₹{item.price} × {item.quantity}</span>
+                        {settings.tax_enabled && taxRate > 0 && (
+                          <span style={{ fontSize:10, color:'var(--text-secondary)' }}>
+                            GST {taxRate}%:&nbsp;
+                            <span style={{ color:'var(--primary)', fontWeight:600 }}>+₹{gstAmt.toFixed(2)}</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>₹{item.price} × {item.quantity}</div>
+                  );
+                })}
+              </div>
+              {/* Running cart total */}
+              {cart.length > 0 && (() => {
+                const { subtotal, discountAmount, taxAmount, total } = calculateBill();
+                const netTotal = Math.max(0, total - loyaltyDiscount);
+                return (
+                  <div style={{ borderTop:'2px solid var(--accent)', padding:'8px 12px', flexShrink:0, background:'var(--bg-tertiary)' }}>
+                    {discountAmount > 0 && (
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-secondary)', marginBottom:2 }}>
+                        <span>Subtotal</span><span>{formatCurrency(subtotal)}</span>
+                      </div>
+                    )}
+                    {discountAmount > 0 && (
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--success)', marginBottom:2 }}>
+                        <span>Discount</span><span>−{formatCurrency(discountAmount)}</span>
+                      </div>
+                    )}
+                    {settings.tax_enabled && (
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-secondary)', marginBottom:4 }}>
+                        <span>GST</span><span>{formatCurrency(taxAmount)}</span>
+                      </div>
+                    )}
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, fontWeight:'bold', color:'var(--accent)' }}>
+                      <span>Total</span>
+                      <span>{formatCurrency(netTotal)}</span>
+                    </div>
                   </div>
-                ))}
+                );
+              })()}
               </div>
             </div>
 
