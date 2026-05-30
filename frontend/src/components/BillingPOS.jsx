@@ -32,6 +32,7 @@ const VIEWS = {
   ANALYTICS: 'analytics',
   THERMAL_PRINT: 'thermal_print',
   BARCODE_LABELS: 'barcode_labels',
+  TAX_GST: 'tax_gst',
 };
 
 const TAX_RATES = [0, 5, 12, 18, 28];
@@ -162,6 +163,14 @@ const BillingPOS = () => {
   const [analyticsStart, setAnalyticsStart] = useState('');
   const [analyticsEnd, setAnalyticsEnd] = useState('');
 
+  // Tax & GST
+  const [taxGstData, setTaxGstData] = useState(null);
+  const [taxGstPeriod, setTaxGstPeriod] = useState('month');
+  const [taxGstStart, setTaxGstStart] = useState('');
+  const [taxGstEnd, setTaxGstEnd] = useState('');
+  const [taxGstLoading, setTaxGstLoading] = useState(false);
+  const [taxGstTab, setTaxGstTab] = useState('summary'); // 'summary' | 'products' | 'bills'
+
   // Thermal Print
   const [thermalWidth, setThermalWidth] = useState(() => localStorage.getItem('thermal_width') || '80');
   const [thermalFont, setThermalFont] = useState(() => localStorage.getItem('thermal_font') || '12');
@@ -261,12 +270,17 @@ const BillingPOS = () => {
     if (view === VIEWS.BRANCHES || view === VIEWS.USERS) { fetchBranches(); fetchAppUsers(); }
     if (view === VIEWS.LOYALTY) fetchLoyaltySettings();
     if (view === VIEWS.ANALYTICS) fetchAnalytics();
+    if (view === VIEWS.TAX_GST) fetchTaxGstData();
     if (view === VIEWS.BARCODE_LABELS) setBarcodeProducts(products);
   }, [view]);
 
   useEffect(() => {
     if (view === VIEWS.ANALYTICS) fetchAnalytics();
   }, [analyticsPeriod, analyticsStart, analyticsEnd]);
+
+  useEffect(() => {
+    if (view === VIEWS.TAX_GST) fetchTaxGstData();
+  }, [taxGstPeriod, taxGstStart, taxGstEnd]);
 
   useEffect(() => {
     if (customerPhone && customerPhone.length >= 10 && loyaltySettings.enabled) {
@@ -432,7 +446,7 @@ const BillingPOS = () => {
     if (existing) {
       setQuotCart(quotCart.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
     } else {
-      setQuotCart([...quotCart, { product_id: product.id, name: product.name, price: product.price, quantity: 1, hsn_code: product.hsn_code || '' }]);
+      setQuotCart([...quotCart, { product_id: product.id, name: product.name, price: product.price, quantity: 1, hsn_code: product.hsn_code || '', tax_percent: product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent }]);
     }
   };
 
@@ -523,8 +537,14 @@ const BillingPOS = () => {
     ${bill.customer_name ? '<div><span class="bold">Customer:</span> ' + bill.customer_name + '</div>' : ''}
     ${bill.customer_phone ? '<div><span class="bold">Phone:</span> ' + bill.customer_phone + '</div>' : ''}
     <div class="divider"></div>
-    <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th class="right">Amt</th></tr></thead>
-    <tbody>${bill.items.map(i => `<tr><td>${i.name}${i.hsn_code ? '<br/><small>HSN: ' + i.hsn_code + '</small>' : ''}</td><td>${i.quantity}</td><td>₹${i.price.toFixed(2)}</td><td class="right">₹${(i.price * i.quantity).toFixed(2)}</td></tr>`).join('')}</tbody></table>
+    <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>GST</th><th class="right">Amt</th></tr></thead>
+    <tbody>${bill.items.map(i => {
+      const taxRate = i.tax_percent !== undefined ? i.tax_percent : (bill.tax_percent || 18);
+      const lineTotal = i.price * i.quantity;
+      const taxBase = lineTotal / (1 + taxRate / 100);
+      const itemGst = lineTotal - taxBase;
+      return `<tr><td>${i.name}${i.hsn_code ? '<br/><small>HSN: ' + i.hsn_code + '</small>' : ''}</td><td>${i.quantity}</td><td>₹${i.price.toFixed(2)}</td><td><small>${taxRate}%<br/>₹${itemGst.toFixed(2)}</small></td><td class="right">₹${lineTotal.toFixed(2)}</td></tr>`;
+    }).join('')}</tbody></table>
     <div class="divider"></div>
     <table>
       <tr><td>Subtotal</td><td class="right">₹${bill.subtotal.toFixed(2)}</td></tr>
@@ -674,7 +694,8 @@ const BillingPOS = () => {
         name: product.name,
         price: product.price,
         quantity: 1,
-        hsn_code: product.hsn_code
+        hsn_code: product.hsn_code,
+        tax_percent: product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent
       }]);
     }
     showNotification(`${product.name} added to cart`);
@@ -880,7 +901,8 @@ const BillingPOS = () => {
         stock: parseInt(editProduct.stock),
         barcode: editProduct.barcode,
         unit: editProduct.unit,
-        hsn_code: editProduct.hsn_code
+        hsn_code: editProduct.hsn_code,
+        tax_percent: editProduct.tax_percent !== undefined ? parseFloat(editProduct.tax_percent) : settings.tax_percent
       });
       showNotification('Product updated successfully', 'success');
       setEditProduct(null);
@@ -1130,6 +1152,116 @@ const BillingPOS = () => {
     } catch (e) { showNotification('Error fetching analytics', 'error'); }
   };
 
+  const fetchTaxGstData = async () => {
+    setTaxGstLoading(true);
+    try {
+      const params = { period: taxGstPeriod };
+      if (taxGstStart) params.start_date = new Date(taxGstStart).toISOString();
+      if (taxGstEnd) params.end_date = new Date(taxGstEnd + 'T23:59:59').toISOString();
+      const res = await axios.get(`${API}/reports/profit-loss`, { params });
+      // Also fetch all bills for detailed tax breakdown
+      const billParams = {};
+      if (taxGstStart) billParams.start_date = new Date(taxGstStart).toISOString();
+      if (taxGstEnd) billParams.end_date = new Date(taxGstEnd + 'T23:59:59').toISOString();
+      // Use summary data and compute detailed breakdowns client-side from bills
+      const billsRes = await axios.get(`${API}/bills`, { params: billParams });
+      const allBills = billsRes.data;
+
+      // Filter by period if no custom date range
+      let filteredBills = allBills;
+      if (!taxGstStart && taxGstPeriod !== 'all') {
+        const now = new Date();
+        let cutoff;
+        if (taxGstPeriod === 'today') { cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
+        else if (taxGstPeriod === 'week') { cutoff = new Date(now - 7 * 86400000); }
+        else if (taxGstPeriod === 'month') { cutoff = new Date(now - 30 * 86400000); }
+        else if (taxGstPeriod === 'year') { cutoff = new Date(now - 365 * 86400000); }
+        if (cutoff) filteredBills = allBills.filter(b => new Date(b.created_at) >= cutoff);
+      }
+
+      // Per-product GST breakdown
+      const productTaxMap = {};
+      filteredBills.forEach(bill => {
+        bill.items.forEach(item => {
+          const key = item.name;
+          if (!productTaxMap[key]) {
+            productTaxMap[key] = {
+              name: item.name,
+              hsn_code: item.hsn_code || '',
+              tax_percent: item.tax_percent || bill.tax_percent || 18,
+              qty_sold: 0,
+              taxable_amount: 0,
+              tax_amount: 0,
+              total_amount: 0,
+            };
+          }
+          const taxRate = item.tax_percent || bill.tax_percent || 18;
+          const lineTotal = item.price * item.quantity;
+          const taxableBase = lineTotal / (1 + taxRate / 100);
+          const itemTax = lineTotal - taxableBase;
+          productTaxMap[key].qty_sold += item.quantity;
+          productTaxMap[key].taxable_amount += taxableBase;
+          productTaxMap[key].tax_amount += itemTax;
+          productTaxMap[key].total_amount += lineTotal;
+        });
+      });
+
+      // Weekly breakdown
+      const weeklyMap = {};
+      filteredBills.forEach(bill => {
+        const d = new Date(bill.created_at);
+        // Week number within year
+        const startOfYear = new Date(d.getFullYear(), 0, 1);
+        const weekNo = Math.ceil(((d - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
+        const key = `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+        if (!weeklyMap[key]) weeklyMap[key] = { week: key, revenue: 0, tax: 0, discount: 0, bills: 0 };
+        weeklyMap[key].revenue += bill.total;
+        weeklyMap[key].tax += bill.tax_amount || 0;
+        weeklyMap[key].discount += bill.discount_amount || 0;
+        weeklyMap[key].bills += 1;
+      });
+
+      // Monthly breakdown
+      const monthlyMap = {};
+      filteredBills.forEach(bill => {
+        const d = new Date(bill.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (!monthlyMap[key]) monthlyMap[key] = { month: key, revenue: 0, tax: 0, discount: 0, bills: 0 };
+        monthlyMap[key].revenue += bill.total;
+        monthlyMap[key].tax += bill.tax_amount || 0;
+        monthlyMap[key].discount += bill.discount_amount || 0;
+        monthlyMap[key].bills += 1;
+      });
+
+      // GST slab breakdown
+      const slabMap = {};
+      filteredBills.forEach(bill => {
+        const slabKey = `${bill.tax_percent || 18}%`;
+        if (!slabMap[slabKey]) slabMap[slabKey] = { slab: slabKey, taxable_amount: 0, tax_amount: 0, bills: 0 };
+        slabMap[slabKey].taxable_amount += bill.subtotal - (bill.discount_amount || 0);
+        slabMap[slabKey].tax_amount += bill.tax_amount || 0;
+        slabMap[slabKey].bills += 1;
+      });
+
+      setTaxGstData({
+        summary: res.data,
+        bills: filteredBills,
+        productBreakdown: Object.values(productTaxMap).sort((a, b) => b.tax_amount - a.tax_amount),
+        weeklyBreakdown: Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week)),
+        monthlyBreakdown: Object.values(monthlyMap).sort((a, b) => a.month.localeCompare(b.month)),
+        slabBreakdown: Object.values(slabMap).sort((a, b) => parseFloat(a.slab) - parseFloat(b.slab)),
+        totalTax: filteredBills.reduce((s, b) => s + (b.tax_amount || 0), 0),
+        totalRevenue: filteredBills.reduce((s, b) => s + b.total, 0),
+        totalDiscount: filteredBills.reduce((s, b) => s + (b.discount_amount || 0), 0),
+        totalBills: filteredBills.length,
+      });
+    } catch (e) {
+      showNotification('Error fetching tax data', 'error');
+    } finally {
+      setTaxGstLoading(false);
+    }
+  };
+
   const printThermal = (bill) => {
     const w = parseInt(thermalWidth);
     const font = parseInt(thermalFont);
@@ -1311,6 +1443,108 @@ const BillingPOS = () => {
     saveAs(blob, `${filename}.xlsx`);
   };
 
+  const exportTaxGstExcel = () => {
+    if (!taxGstData) return;
+    const wb = XLSX.utils.book_new();
+
+    // Summary sheet
+    const summaryData = [
+      { Metric: 'Total Revenue', Value: taxGstData.totalRevenue.toFixed(2) },
+      { Metric: 'Total Tax (GST)', Value: taxGstData.totalTax.toFixed(2) },
+      { Metric: 'Total Discount', Value: taxGstData.totalDiscount.toFixed(2) },
+      { Metric: 'Total Bills', Value: taxGstData.totalBills },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Summary');
+
+    // Product GST sheet
+    const productData = taxGstData.productBreakdown.map(p => ({
+      'Product': p.name,
+      'HSN Code': p.hsn_code,
+      'GST Rate (%)': p.tax_percent,
+      'Qty Sold': p.qty_sold,
+      'Taxable Amount (₹)': p.taxable_amount.toFixed(2),
+      'GST Amount (₹)': p.tax_amount.toFixed(2),
+      'Total Amount (₹)': p.total_amount.toFixed(2),
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(productData), 'Product GST');
+
+    // Monthly sheet
+    const monthlyData = taxGstData.monthlyBreakdown.map(m => ({
+      'Month': m.month,
+      'Revenue (₹)': m.revenue.toFixed(2),
+      'GST (₹)': m.tax.toFixed(2),
+      'Discount (₹)': m.discount.toFixed(2),
+      'Bills': m.bills,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthlyData), 'Monthly Tax');
+
+    // Weekly sheet
+    const weeklyData = taxGstData.weeklyBreakdown.map(w => ({
+      'Week': w.week,
+      'Revenue (₹)': w.revenue.toFixed(2),
+      'GST (₹)': w.tax.toFixed(2),
+      'Discount (₹)': w.discount.toFixed(2),
+      'Bills': w.bills,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(weeklyData), 'Weekly Tax');
+
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf]), `tax-gst-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportTaxGstPDF = () => {
+    if (!taxGstData) return;
+    const win = window.open('', '_blank');
+    const periodLabel = taxGstStart ? `${taxGstStart} to ${taxGstEnd || 'today'}` : taxGstPeriod.toUpperCase();
+    const productRows = taxGstData.productBreakdown.map(p =>
+      `<tr><td>${p.name}</td><td>${p.hsn_code || '-'}</td><td>${p.tax_percent}%</td><td>${p.qty_sold}</td><td>₹${p.taxable_amount.toFixed(2)}</td><td>₹${p.tax_amount.toFixed(2)}</td><td>₹${p.total_amount.toFixed(2)}</td></tr>`
+    ).join('');
+    const monthlyRows = taxGstData.monthlyBreakdown.map(m =>
+      `<tr><td>${m.month}</td><td>₹${m.revenue.toFixed(2)}</td><td>₹${m.tax.toFixed(2)}</td><td>₹${m.discount.toFixed(2)}</td><td>${m.bills}</td></tr>`
+    ).join('');
+    const slabRows = taxGstData.slabBreakdown.map(s =>
+      `<tr><td>${s.slab}</td><td>₹${s.taxable_amount.toFixed(2)}</td><td>₹${s.tax_amount.toFixed(2)}</td><td>${s.bills}</td></tr>`
+    ).join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Tax & GST Report</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:20px;font-size:12px;color:#222;}
+      h1{font-size:20px;text-align:center;margin-bottom:4px;}
+      h2{font-size:15px;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px;}
+      .period{text-align:center;color:#666;margin-bottom:16px;}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+      th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;}
+      th{background:#f0f0f0;font-weight:bold;}
+      .summary-grid{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+      .summary-box{flex:1;min-width:120px;border:1px solid #ddd;border-radius:6px;padding:10px;text-align:center;}
+      .summary-box .val{font-size:18px;font-weight:bold;color:#1a6e1a;}
+      .summary-box .lbl{font-size:11px;color:#666;margin-top:4px;}
+      @media print{body{margin:10px;}}
+    </style></head><body>
+    <h1>${settings.shop_name || 'Shop'} — Tax & GST Report</h1>
+    <div class="period">Period: ${periodLabel} | GSTIN: ${settings.gstin || 'N/A'}</div>
+    <h2>Summary</h2>
+    <div class="summary-grid">
+      <div class="summary-box"><div class="val">₹${taxGstData.totalRevenue.toFixed(2)}</div><div class="lbl">Total Revenue</div></div>
+      <div class="summary-box"><div class="val">₹${taxGstData.totalTax.toFixed(2)}</div><div class="lbl">Total GST Collected</div></div>
+      <div class="summary-box"><div class="val">₹${taxGstData.totalDiscount.toFixed(2)}</div><div class="lbl">Total Discount</div></div>
+      <div class="summary-box"><div class="val">${taxGstData.totalBills}</div><div class="lbl">Total Bills</div></div>
+    </div>
+    <h2>GST by Tax Slab</h2>
+    <table><thead><tr><th>GST Slab</th><th>Taxable Amount</th><th>GST Amount</th><th>Bills</th></tr></thead>
+    <tbody>${slabRows}</tbody></table>
+    <h2>Product-wise GST Breakdown</h2>
+    <table><thead><tr><th>Product</th><th>HSN</th><th>GST%</th><th>Qty</th><th>Taxable Amt</th><th>GST Amt</th><th>Total</th></tr></thead>
+    <tbody>${productRows}</tbody></table>
+    <h2>Monthly Tax Summary</h2>
+    <table><thead><tr><th>Month</th><th>Revenue</th><th>GST</th><th>Discount</th><th>Bills</th></tr></thead>
+    <tbody>${monthlyRows}</tbody></table>
+    <div style="text-align:center;margin-top:20px;color:#999;font-size:11px;">Generated on ${new Date().toLocaleString()} | ${settings.software_name || 'POS System'}</div>
+    </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); };
+  };
+
   const exportBills = () => {
     const data = bills.map(b => ({
       'Invoice No': b.invoice_no,
@@ -1408,6 +1642,7 @@ const BillingPOS = () => {
             { id: VIEWS.RETURNS, icon: '↩️', label: 'Returns' },
             { id: VIEWS.EXPENSES, icon: '💸', label: 'Expenses' },
             { id: VIEWS.ANALYTICS, icon: '📈', label: 'P&L Analytics' },
+            { id: VIEWS.TAX_GST, icon: '🧮', label: 'Tax & GST' },
             { id: VIEWS.SUPPLIERS, icon: '🏭', label: 'Suppliers' },
             { id: VIEWS.PURCHASE_ORDERS, icon: '📥', label: 'Purchase Orders' },
             { id: VIEWS.BRANCHES, icon: '🏢', label: 'Branches & Users' },
@@ -1782,7 +2017,8 @@ const BillingPOS = () => {
                   'Price': p.price,
                   'Barcode': p.barcode,
                   'Unit': p.unit,
-                  'HSN': p.hsn_code
+                  'HSN': p.hsn_code,
+                  'GST Rate (%)': p.tax_percent !== undefined ? p.tax_percent : settings.tax_percent
                 })), 'low-stock-products'
               )}>Export to Excel</button>
             </div>
@@ -1928,6 +2164,22 @@ const BillingPOS = () => {
               </button>
             </div>
 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{products.length} products</span>
+              <button className="btn btn-primary" onClick={() => exportToExcel(
+                products.map(p => ({
+                  'Name': p.name,
+                  'Category': p.category,
+                  'Price': p.price,
+                  'Stock': p.stock,
+                  'Unit': p.unit,
+                  'Barcode': p.barcode,
+                  'HSN Code': p.hsn_code,
+                  'GST Rate (%)': p.tax_percent !== undefined ? p.tax_percent : settings.tax_percent
+                })), 'inventory'
+              )}>📊 Export to Excel</button>
+            </div>
+
             <div className="table-container">
               <table className="data-table">
                 <thead>
@@ -1938,6 +2190,7 @@ const BillingPOS = () => {
                     <th>Stock</th>
                     <th>Barcode</th>
                     <th>HSN</th>
+                    <th>GST Rate</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -1957,6 +2210,11 @@ const BillingPOS = () => {
                         <td>{product.stock}</td>
                         <td>{product.barcode}</td>
                         <td>{product.hsn_code}</td>
+                        <td>
+                          <span style={{ background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                            {product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent}%
+                          </span>
+                        </td>
                         <td style={{ color: stockStatus.color, fontWeight: 'bold' }}>
                           {stockStatus.text}
                         </td>
@@ -3209,6 +3467,348 @@ const BillingPOS = () => {
           </div>
         )}
 
+        {/* Tax & GST Report Panel */}
+        {view === VIEWS.TAX_GST && (
+          <div className="content-view">
+            <div className="view-header">
+              <h2 className="section-title">🧮 Tax & GST Report</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={fetchTaxGstData}>🔄 Refresh</button>
+                <button className="btn btn-primary" onClick={exportTaxGstExcel}>📊 Export Excel</button>
+                <button className="btn" onClick={exportTaxGstPDF}>📄 Download PDF</button>
+              </div>
+            </div>
+
+            {/* Period Filters */}
+            <div className="filters-bar">
+              <div className="period-filters">
+                {['today','week','month','year','all'].map(p => (
+                  <button key={p} className={`btn ${taxGstPeriod === p && !taxGstStart ? 'active' : ''}`}
+                    onClick={() => { setTaxGstPeriod(p); setTaxGstStart(''); setTaxGstEnd(''); }}>
+                    {p === 'today' ? 'Today' : p === 'week' ? 'Week' : p === 'month' ? 'Month' : p === 'year' ? 'Year' : 'All Time'}
+                  </button>
+                ))}
+              </div>
+              <div className="date-range">
+                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>📅</span>
+                <input className="input date-input" type="date" value={taxGstStart}
+                  onChange={e => { setTaxGstStart(e.target.value); setTaxGstPeriod(''); }} />
+                <span>to</span>
+                <input className="input date-input" type="date" value={taxGstEnd}
+                  onChange={e => { setTaxGstEnd(e.target.value); setTaxGstPeriod(''); }} />
+              </div>
+            </div>
+
+            {taxGstLoading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>⏳ Loading tax data...</div>}
+
+            {taxGstData && !taxGstLoading && (
+              <>
+                {/* Summary Cards */}
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-label">Total Revenue</div>
+                    <div className="stat-value amount-text">{formatCurrency(taxGstData.totalRevenue)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Total GST Collected</div>
+                    <div className="stat-value" style={{ color: 'var(--primary)' }}>{formatCurrency(taxGstData.totalTax)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Total Discount Given</div>
+                    <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(taxGstData.totalDiscount)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Total Bills</div>
+                    <div className="stat-value">{taxGstData.totalBills}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Taxable Amount</div>
+                    <div className="stat-value">{formatCurrency(taxGstData.totalRevenue - taxGstData.totalTax)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Effective Tax Rate</div>
+                    <div className="stat-value">
+                      {taxGstData.totalRevenue > 0 ? ((taxGstData.totalTax / taxGstData.totalRevenue) * 100).toFixed(1) : 0}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tab Navigation */}
+                <div style={{ display: 'flex', gap: 8, margin: '16px 0 12px', borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+                  {[
+                    { key: 'summary', label: '📋 GST Slabs' },
+                    { key: 'weekly', label: '📅 Weekly' },
+                    { key: 'monthly', label: '🗓️ Monthly' },
+                    { key: 'yearly', label: '📆 Yearly' },
+                    { key: 'products', label: '🏷️ By Product' },
+                    { key: 'bills', label: '🧾 Bill Details' },
+                  ].map(tab => (
+                    <button key={tab.key}
+                      className={`btn ${taxGstTab === tab.key ? 'btn-primary' : ''}`}
+                      style={{ borderRadius: '6px 6px 0 0', borderBottom: taxGstTab === tab.key ? 'none' : undefined }}
+                      onClick={() => setTaxGstTab(tab.key)}>
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* GST Slabs Tab */}
+                {taxGstTab === 'summary' && (
+                  <div className="card">
+                    <h3 className="card-title">GST by Tax Slab</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>GST Slab</th>
+                            <th>Taxable Amount</th>
+                            <th>CGST (Half)</th>
+                            <th>SGST (Half)</th>
+                            <th>Total GST</th>
+                            <th>No. of Bills</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxGstData.slabBreakdown.map((s, i) => (
+                            <tr key={i}>
+                              <td><span className="badge" style={{ background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>{s.slab}</span></td>
+                              <td className="amount-text">{formatCurrency(s.taxable_amount)}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{formatCurrency(s.tax_amount / 2)}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{formatCurrency(s.tax_amount / 2)}</td>
+                              <td className="amount-text" style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(s.tax_amount)}</td>
+                              <td>{s.bills}</td>
+                            </tr>
+                          ))}
+                          <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)' }}>
+                            <td>TOTAL</td>
+                            <td className="amount-text">{formatCurrency(taxGstData.slabBreakdown.reduce((s, r) => s + r.taxable_amount, 0))}</td>
+                            <td>{formatCurrency(taxGstData.totalTax / 2)}</td>
+                            <td>{formatCurrency(taxGstData.totalTax / 2)}</td>
+                            <td className="amount-text" style={{ color: 'var(--primary)' }}>{formatCurrency(taxGstData.totalTax)}</td>
+                            <td>{taxGstData.totalBills}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Weekly Tab */}
+                {taxGstTab === 'weekly' && (
+                  <div className="card">
+                    <h3 className="card-title">Weekly Tax Breakdown</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Week</th><th>Revenue</th><th>GST Collected</th><th>Discount</th><th>Bills</th></tr>
+                        </thead>
+                        <tbody>
+                          {taxGstData.weeklyBreakdown.length === 0
+                            ? <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>
+                            : taxGstData.weeklyBreakdown.map((w, i) => (
+                              <tr key={i}>
+                                <td><strong>{w.week}</strong></td>
+                                <td className="amount-text">{formatCurrency(w.revenue)}</td>
+                                <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(w.tax)}</td>
+                                <td style={{ color: 'var(--danger)' }}>{formatCurrency(w.discount)}</td>
+                                <td>{w.bills}</td>
+                              </tr>
+                            ))
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Monthly Tab */}
+                {taxGstTab === 'monthly' && (
+                  <div className="card">
+                    <h3 className="card-title">Monthly Tax Summary</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Month</th><th>Revenue</th><th>GST Collected</th><th>Discount</th><th>Bills</th><th>Avg GST/Bill</th></tr>
+                        </thead>
+                        <tbody>
+                          {taxGstData.monthlyBreakdown.length === 0
+                            ? <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>
+                            : taxGstData.monthlyBreakdown.map((m, i) => (
+                              <tr key={i}>
+                                <td><strong>{m.month}</strong></td>
+                                <td className="amount-text">{formatCurrency(m.revenue)}</td>
+                                <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(m.tax)}</td>
+                                <td style={{ color: 'var(--danger)' }}>{formatCurrency(m.discount)}</td>
+                                <td>{m.bills}</td>
+                                <td style={{ color: 'var(--text-secondary)' }}>{m.bills > 0 ? formatCurrency(m.tax / m.bills) : '-'}</td>
+                              </tr>
+                            ))
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Yearly Tab */}
+                {taxGstTab === 'yearly' && (
+                  <div className="card">
+                    <h3 className="card-title">Yearly Tax Summary</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Year</th><th>Revenue</th><th>GST Collected</th><th>Discount</th><th>Bills</th><th>Avg Monthly GST</th></tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const yearlyMap = {};
+                            taxGstData.monthlyBreakdown.forEach(m => {
+                              const yr = m.month.slice(0, 4);
+                              if (!yearlyMap[yr]) yearlyMap[yr] = { year: yr, revenue: 0, tax: 0, discount: 0, bills: 0, months: 0 };
+                              yearlyMap[yr].revenue += m.revenue;
+                              yearlyMap[yr].tax += m.tax;
+                              yearlyMap[yr].discount += m.discount;
+                              yearlyMap[yr].bills += m.bills;
+                              yearlyMap[yr].months += 1;
+                            });
+                            const years = Object.values(yearlyMap).sort((a, b) => a.year.localeCompare(b.year));
+                            return years.length === 0
+                              ? <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>
+                              : years.map((y, i) => (
+                                <tr key={i}>
+                                  <td><strong>{y.year}</strong></td>
+                                  <td className="amount-text">{formatCurrency(y.revenue)}</td>
+                                  <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(y.tax)}</td>
+                                  <td style={{ color: 'var(--danger)' }}>{formatCurrency(y.discount)}</td>
+                                  <td>{y.bills}</td>
+                                  <td style={{ color: 'var(--text-secondary)' }}>{y.months > 0 ? formatCurrency(y.tax / y.months) : '-'}</td>
+                                </tr>
+                              ));
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Product GST Tab */}
+                {taxGstTab === 'products' && (
+                  <div className="card">
+                    <h3 className="card-title">Product-wise GST Breakdown</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Product</th>
+                            <th>HSN Code</th>
+                            <th>GST Rate</th>
+                            <th>Qty Sold</th>
+                            <th>Taxable Amount</th>
+                            <th>CGST</th>
+                            <th>SGST</th>
+                            <th>Total GST</th>
+                            <th>Total Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxGstData.productBreakdown.length === 0
+                            ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>
+                            : taxGstData.productBreakdown.map((p, i) => (
+                              <tr key={i}>
+                                <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                <td><strong>{p.name}</strong></td>
+                                <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{p.hsn_code || '-'}</td>
+                                <td>
+                                  <span style={{ background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11 }}>
+                                    {p.tax_percent}%
+                                  </span>
+                                </td>
+                                <td>{p.qty_sold}</td>
+                                <td className="amount-text">{formatCurrency(p.taxable_amount)}</td>
+                                <td style={{ color: 'var(--text-secondary)' }}>{formatCurrency(p.tax_amount / 2)}</td>
+                                <td style={{ color: 'var(--text-secondary)' }}>{formatCurrency(p.tax_amount / 2)}</td>
+                                <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(p.tax_amount)}</td>
+                                <td className="amount-text">{formatCurrency(p.total_amount)}</td>
+                              </tr>
+                            ))
+                          }
+                          {taxGstData.productBreakdown.length > 0 && (
+                            <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)', background: 'var(--surface)' }}>
+                              <td colSpan={4}>TOTAL</td>
+                              <td>{taxGstData.productBreakdown.reduce((s, p) => s + p.qty_sold, 0)}</td>
+                              <td className="amount-text">{formatCurrency(taxGstData.productBreakdown.reduce((s, p) => s + p.taxable_amount, 0))}</td>
+                              <td>{formatCurrency(taxGstData.totalTax / 2)}</td>
+                              <td>{formatCurrency(taxGstData.totalTax / 2)}</td>
+                              <td style={{ color: 'var(--primary)' }}>{formatCurrency(taxGstData.totalTax)}</td>
+                              <td className="amount-text">{formatCurrency(taxGstData.totalRevenue)}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Bill Details Tab */}
+                {taxGstTab === 'bills' && (
+                  <div className="card">
+                    <h3 className="card-title">Bill-wise Tax Details ({taxGstData.bills.length} bills)</h3>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>Subtotal</th>
+                            <th>Discount</th>
+                            <th>GST %</th>
+                            <th>GST Amount</th>
+                            <th>Total</th>
+                            <th>Payment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxGstData.bills.length === 0
+                            ? <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No bills found</td></tr>
+                            : taxGstData.bills.slice(0, 200).map((b, i) => (
+                              <tr key={i}>
+                                <td><strong>{b.invoice_no}</strong></td>
+                                <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{new Date(b.created_at).toLocaleDateString()}</td>
+                                <td>{b.customer_name || '-'}</td>
+                                <td className="amount-text">{formatCurrency(b.subtotal)}</td>
+                                <td style={{ color: 'var(--danger)' }}>{b.discount_amount > 0 ? formatCurrency(b.discount_amount) : '-'}</td>
+                                <td>
+                                  <span style={{ background: 'var(--primary)', color: '#fff', padding: '1px 6px', borderRadius: 10, fontSize: 11 }}>
+                                    {b.tax_percent || 18}%
+                                  </span>
+                                </td>
+                                <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(b.tax_amount)}</td>
+                                <td className="amount-text">{formatCurrency(b.total)}</td>
+                                <td style={{ fontSize: 12 }}>{b.payment_method}</td>
+                              </tr>
+                            ))
+                          }
+                          {taxGstData.bills.length > 200 && (
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                              Showing first 200 of {taxGstData.bills.length} bills. Export to Excel for full data.
+                            </td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!taxGstData && !taxGstLoading && (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Select a period to load tax report</div>
+            )}
+          </div>
+        )}
+
         {/* Suppliers Registry Panel */}
         {view === VIEWS.SUPPLIERS && (
           <div className="content-view">
@@ -3634,21 +4234,32 @@ const BillingPOS = () => {
                     <th>Item</th>
                     <th>Qty</th>
                     <th>Price</th>
+                    <th>GST</th>
                     <th>Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {showReceipt.items.map((item, idx) => (
-                    <tr key={idx}>
-                      <td>
-                        {item.name}
-                        {item.hsn_code && <div className="sub-text">HSN: {item.hsn_code}</div>}
-                      </td>
-                      <td>{item.quantity}</td>
-                      <td>{formatCurrency(item.price)}</td>
-                      <td>{formatCurrency(item.price * item.quantity)}</td>
-                    </tr>
-                  ))}
+                  {showReceipt.items.map((item, idx) => {
+                    const taxRate = item.tax_percent !== undefined ? item.tax_percent : (showReceipt.tax_percent || 18);
+                    const lineTotal = item.price * item.quantity;
+                    const taxableBase = settings.tax_enabled ? lineTotal / (1 + taxRate / 100) : lineTotal;
+                    const itemTax = settings.tax_enabled ? lineTotal - taxableBase : 0;
+                    return (
+                      <tr key={idx}>
+                        <td>
+                          {item.name}
+                          {item.hsn_code && <div className="sub-text">HSN: {item.hsn_code}</div>}
+                        </td>
+                        <td>{item.quantity}</td>
+                        <td>{formatCurrency(item.price)}</td>
+                        <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                          {settings.tax_enabled ? `${taxRate}%` : '-'}
+                          {settings.tax_enabled && <div className="sub-text">{formatCurrency(itemTax)}</div>}
+                        </td>
+                        <td>{formatCurrency(lineTotal)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3779,6 +4390,16 @@ const BillingPOS = () => {
                 value={editProduct.hsn_code}
                 onChange={(e) => setEditProduct({ ...editProduct, hsn_code: e.target.value })}
               />
+              <div className="form-group">
+                <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>GST Rate (%)</label>
+                <select
+                  className="input"
+                  value={editProduct.tax_percent !== undefined ? editProduct.tax_percent : settings.tax_percent}
+                  onChange={(e) => setEditProduct({ ...editProduct, tax_percent: parseFloat(e.target.value) })}
+                >
+                  {TAX_RATES.map(r => <option key={r} value={r}>{r}% GST</option>)}
+                </select>
+              </div>
             </div>
             <div className="modal-actions">
               <button className="btn" onClick={() => setEditProduct(null)}>
