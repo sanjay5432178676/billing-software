@@ -663,6 +663,11 @@ const BillingPOS = () => {
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.product_id === product.id);
     if (existingItem) {
+      // Stock limit validation guardrail
+      if (existingItem.quantity >= product.stock) {
+        showNotification(`Cannot add more than available stock (${product.stock})`, 'error');
+        return;
+      }
       updateQuantity(product.id, existingItem.quantity + 1);
     } else {
       setCart([...cart, {
@@ -681,6 +686,14 @@ const BillingPOS = () => {
       removeFromCart(productId);
       return;
     }
+    
+    // Locate parent master store product info to guard programmatic entry edits
+    const activeProd = products.find(p => p.id === productId);
+    if (activeProd && newQty > activeProd.stock) {
+      showNotification(`Requested quantity exceeds available inventory limits (${activeProd.stock})`, 'error');
+      return;
+    }
+
     setCart(cart.map(item =>
       item.product_id === productId ? { ...item, quantity: newQty } : item
     ));
@@ -695,6 +708,10 @@ const BillingPOS = () => {
       try {
         const res = await axios.get(`${API}/products`, { params: { barcode: barcodeInput } });
         if (res.data.length > 0) {
+          if (res.data[0].stock <= 0) {
+            showNotification('Product is out of stock', 'error');
+            return;
+          }
           addToCart(res.data[0]);
           setBarcodeInput('');
         } else {
@@ -1452,13 +1469,18 @@ const BillingPOS = () => {
 
       <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)}>☰</button>
 
-      {/* Main Content */}
+      {/* Main Content Wrapper */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
-        {/* POS View */}
+        
+        {/* POS View Mode */}
         {view === VIEWS.POS && (
-          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
-            <div style={{ flex:1, minWidth:0, overflowY:'auto', overflowX:'hidden', padding:20 }}>
-              <div className="search-bar">
+          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'calc(100vh - 4rem)' }}>
+            
+            {/* LEFT COLUMN: Dedicated Product Showcase (Uniform size grid with scroll control) */}
+            <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', padding:20, background:'var(--bg-primary)' }}>
+              
+              {/* Top Search Operations */}
+              <div className="search-bar" style={{ flexShrink: 0 }}>
                 <input
                   data-testid="barcode-input"
                   ref={barcodeRef}
@@ -1477,7 +1499,8 @@ const BillingPOS = () => {
                 />
               </div>
 
-              <div className="category-filters">
+              {/* Categorization Menu Filters */}
+              <div className="category-filters" style={{ flexShrink: 0, margin: '12px 0' }}>
                 {CATEGORIES.map(cat => (
                   <button
                     key={cat}
@@ -1490,41 +1513,95 @@ const BillingPOS = () => {
                 ))}
               </div>
 
-              <div className="products-grid">
-                {filteredProducts.map(product => {
-                  const stockStatus = getStockStatus(product.stock);
-                  return (
-                    <div
-                      key={product.id}
-                      data-testid={`product-${product.barcode}`}
-                      className="product-card"
-                      onClick={(e) => { e.currentTarget.blur(); product.stock > 0 && addToCart(product); }}
-                      style={{ opacity: product.stock === 0 ? 0.5 : 1, cursor: product.stock === 0 ? 'not-allowed' : 'pointer' }}
-                    >
-                      <div className="product-header">
-                        <span className="tag" style={{ background: getCategoryColor(product.category) }}>
-                          {product.category}
-                        </span>
-                        <span className="stock-status" style={{ color: stockStatus.color }}>
-                          {stockStatus.text}
-                        </span>
+              {/* Uniform-Size Grid System with independent scroll viewport bounds */}
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+                  {filteredProducts.map(product => {
+                    const stockStatus = getStockStatus(product.stock);
+                    const isOutOfStock = product.stock === 0;
+                    
+                    return (
+                      <div
+                        key={product.id}
+                        data-testid={`product-${product.barcode}`}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'between',
+                          height: 180,
+                          padding: 14,
+                          borderRadius: 8,
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg-secondary)',
+                          opacity: isOutOfStock ? 0.55 : 1,
+                          transition: 'all 0.2s ease-in-out',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        }}
+                        className="product-grid-box"
+                      >
+                        {/* Upper Details Meta Section */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 4 }}>
+                            <span className="tag" style={{ background: getCategoryColor(product.category), fontSize: 10, padding: '2px 6px', borderRadius: 4, color: '#fff', fontWeight: 600 }}>
+                              {product.category}
+                            </span>
+                            <span style={{ color: stockStatus.color, fontSize: 11, fontWeight: 'bold' }}>
+                              {stockStatus.text}
+                            </span>
+                          </div>
+                          
+                          <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.3, color: 'var(--text)' }}>
+                            {product.name}
+                          </div>
+                          
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                            Code: {product.barcode}
+                          </div>
+                        </div>
+
+                        {/* Card pricing and one-by-one click additions interactive triggers */}
+                        <div style={{ marginTop: 8, flexShrink: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
+                              {formatCurrency(product.price)}
+                            </span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                              Stock: {product.stock}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isOutOfStock}
+                            onClick={(e) => { e.stopPropagation(); addToCart(product); }}
+                            style={{
+                              width: '100%',
+                              padding: '6px 0',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              textAlign: 'center',
+                              cursor: isOutOfStock ? 'not-allowed' : 'pointer',
+                              background: isOutOfStock ? 'var(--border)' : 'var(--accent)',
+                              color: isOutOfStock ? 'var(--text-muted)' : '#fff',
+                              border: 'none',
+                              transition: 'opacity 0.15s ease'
+                            }}
+                          >
+                            {isOutOfStock ? 'Out of Stock' : '+ Add 1 Item'}
+                          </button>
+                        </div>
                       </div>
-                      <div className="product-name">{product.name}</div>
-                      <div className="product-code">Code: {product.barcode}</div>
-                      <div className="product-footer">
-                        <span className="product-price">{formatCurrency(product.price)}</span>
-                        <span className="product-stock">Stock: {product.stock}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Checkout Panel Sidebar */}
+            {/* RIGHT COLUMN SIDEBAR: Checkout Summary Controls Panel (Remains entirely as it was) */}
             <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', borderLeft: '2px solid var(--accent)', height: '100%' }}>
               
-              {/* Header (Sticky at top) */}
+              {/* Header */}
               <div className="cart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 10px 20px', flexShrink: 0 }}>
                 <span style={{ fontWeight: 'bold', fontSize: '16px' }}>Current Bill</span>
                 {cart.length > 0 && (
@@ -1568,7 +1645,7 @@ const BillingPOS = () => {
                 </div>
               )}
 
-              {/* ── 1. Scrollable Cart Items Window ── */}
+              {/* Scrollable Cart Items Window */}
               <div className="cart-items" style={{ flex: '1 1 auto', overflowY: 'auto', padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
                 {cart.length === 0 ? (
                   <div className="empty-cart">Cart is empty</div>
@@ -1621,7 +1698,7 @@ const BillingPOS = () => {
                 )}
               </div>
 
-              {/* ── 2. Checkout Controls Footer Section ── */}
+              {/* Checkout Controls Footer Section */}
               {cart.length > 0 && (
                 <div style={{ flexShrink: 0, padding: 20, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
                   
@@ -1670,7 +1747,7 @@ const BillingPOS = () => {
                           )}
                           <div className="summary-line total-line">
                             <span>Total:</span>
-                            <span data-testid="total">{formatCurrency(total)}</span>
+                            <span data-testid="total">{formatCurrency(total - loyaltyDiscount)}</span>
                           </div>
                         </>
                       );
@@ -1746,10 +1823,11 @@ const BillingPOS = () => {
                     {customerPaid && (() => {
                       const { total } = calculateBill();
                       const paid = parseFloat(customerPaid) || 0;
-                      if (paid >= total) {
-                        return <div className="change-info">Change: {formatCurrency(paid - total)}</div>;
+                      const netTotal = Math.max(0, total - loyaltyDiscount);
+                      if (paid >= netTotal) {
+                        return <div className="change-info">Change: {formatCurrency(paid - netTotal)}</div>;
                       } else {
-                        return <div className="balance-info balance-text">Balance Due: {formatCurrency(total - paid)}</div>;
+                        return <div className="balance-info balance-text">Balance Due: {formatCurrency(netTotal - paid)}</div>;
                       }
                     })()}
                   </div>
@@ -3594,7 +3672,7 @@ const BillingPOS = () => {
           </div>
         )}
 
-        {/* LOGIN MODAL */}
+        {/* STAFF LOGIN MODAL */}
         {showLoginModal && (
           <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
@@ -3964,7 +4042,7 @@ const BillingPOS = () => {
         </div>
       )}
 
-      {/* Notification */}
+      {/* Notification Toast overlay context */}
       {notification && (
         <div
           className={`notification ${notification.type}`}
