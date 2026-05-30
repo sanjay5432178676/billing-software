@@ -109,6 +109,7 @@ const BillingPOS = () => {
   const [quotValidUntil, setQuotValidUntil] = useState('');
   const [quotNotes, setQuotNotes] = useState('');
   const [showQuotation, setShowQuotation] = useState(null);
+  const [showQuotHistory, setShowQuotHistory] = useState(false);
   const [quotSearch, setQuotSearch] = useState('');
 
   // Dashboard state
@@ -484,6 +485,7 @@ const BillingPOS = () => {
       setQuotCustomerName('');
       setQuotCustomerPhone('');
       setQuotDiscount(0);
+      setCustomDiscount('');
       setQuotValidUntil('');
       setQuotNotes('');
       fetchQuotations();
@@ -1794,7 +1796,7 @@ const BillingPOS = () => {
 
                         {/* Inventory Details & One-by-One Billing Operations Trigger */}
                         <div style={{ marginTop: 8, flexShrink: 0 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                             <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
                               {formatCurrency(product.price)}
                             </span>
@@ -1802,6 +1804,16 @@ const BillingPOS = () => {
                               Stock: {product.stock}
                             </span>
                           </div>
+                          {settings.tax_enabled && (() => {
+                            const taxRate = product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent;
+                            const taxAmt = product.price - (product.price / (1 + taxRate / 100));
+                            return taxRate > 0 ? (
+                              <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 5, display: 'flex', gap: 4, alignItems: 'center' }}>
+                                <span style={{ background: 'var(--primary)', color: '#fff', padding: '1px 5px', borderRadius: 8, fontWeight: 600 }}>{taxRate}% GST</span>
+                                <span style={{ color: 'var(--text-muted)' }}>incl. ₹{taxAmt.toFixed(2)}</span>
+                              </div>
+                            ) : null;
+                          })()}
 
                           <button
                             type="button"
@@ -2956,121 +2968,244 @@ const BillingPOS = () => {
 
         {/* Quotations Pipeline Interface */}
         {view === VIEWS.QUOTATIONS && (
-          <div className="content-view">
-            <div className="view-header">
-              <h2 className="section-title">📋 Quotations</h2>
-            </div>
+          <div style={{ display:'flex', flexDirection:'row', flex:1, minHeight:0, overflow:'hidden', height:'100%' }}>
 
-            <div className="card add-product-card">
-              <h3 className="card-title">Create New Quotation</h3>
-              <div className="form-grid">
-                <input className="input" placeholder="Customer Name" value={quotCustomerName} onChange={e => setQuotCustomerName(e.target.value)} />
-                <input className="input" placeholder="Customer Phone" value={quotCustomerPhone} onChange={e => setQuotCustomerPhone(e.target.value)} />
-                <div className="form-group">
-                  <label>Valid Until</label>
-                  <input className="input date-input" type="date" value={quotValidUntil} onChange={e => setQuotValidUntil(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Discount %</label>
-                  <input className="input" type="number" min="0" max="100" placeholder="0" value={quotDiscount} onChange={e => setQuotDiscount(parseFloat(e.target.value) || 0)} />
-                </div>
+            {/* ═══ LEFT: Product Browser ═══ */}
+            <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg-primary)' }}>
+
+              {/* Barcode + Search bar */}
+              <div className="search-bar" style={{ flexShrink:0, padding:'12px 16px 0 16px' }}>
+                <input
+                  className="input"
+                  placeholder="Scan barcode..."
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const found = products.find(p => p.barcode === e.target.value.trim());
+                      if (found) { addToQuotCart(found); e.target.value = ''; }
+                    }
+                  }}
+                />
+                <input
+                  className="input"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
               </div>
-              <input className="input" placeholder="Notes (optional)" value={quotNotes} onChange={e => setQuotNotes(e.target.value)} style={{ marginBottom: 12 }} />
 
-              <div style={{ marginBottom: 10, fontWeight: 600, fontSize: 13, color: 'var(--text-muted)' }}>ADD PRODUCTS</div>
-              <div className="products-grid" style={{ maxHeight: 280, overflowY: 'auto', marginBottom: 12 }}>
-                {products.map(p => (
-                  <div key={p.id} className="product-card" onClick={() => addToQuotCart(p)} style={{ cursor: 'pointer' }}>
-                    <div className="product-name">{p.name}</div>
-                    <div className="product-footer">
-                      <span className="product-price">{formatCurrency(p.price)}</span>
-                      <span className="product-stock">Stock: {p.stock}</span>
-                    </div>
-                  </div>
+              {/* Category Filter Pills */}
+              <div className="category-filters" style={{ flexShrink:0, margin:'8px 16px', flexWrap:'wrap' }}>
+                {CATEGORIES.map(cat => (
+                  <button key={cat}
+                    className={`btn category-btn ${selectedCategory === cat ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory(cat)}>
+                    {cat}
+                  </button>
                 ))}
               </div>
 
-              {quotCart.length > 0 && (
-                <>
-                  <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: 'var(--text-muted)' }}>QUOTATION ITEMS</div>
-                  <div className="table-container" style={{ marginBottom: 12 }}>
-                    <table className="data-table">
-                      <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr></thead>
-                      <tbody>
-                        {quotCart.map(item => (
-                          <tr key={item.product_id}>
-                            <td>{item.name}</td>
-                            <td>{formatCurrency(item.price)}</td>
-                            <td>
-                              <input type="number" className="input qty-input" min="1" value={item.quantity}
-                                onChange={e => setQuotCart(quotCart.map(i => i.product_id === item.product_id ? { ...i, quantity: parseInt(e.target.value) || 1 } : i))} />
-                            </td>
-                            <td>{formatCurrency(item.price * item.quantity)}</td>
-                            <td><button className="btn btn-danger btn-sm" onClick={() => setQuotCart(quotCart.filter(i => i.product_id !== item.product_id))}>✕</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {(() => {
-                    const { subtotal, discountAmount, taxAmount, total } = calculateQuotation();
+              {/* Product Grid */}
+              <div style={{ flex:1, overflowY:'auto', padding:'0 16px 8px 16px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
+                  {filteredProducts.map(product => {
+                    const taxRate = product.tax_percent !== undefined ? product.tax_percent : settings.tax_percent;
+                    const taxAmt = product.price - (product.price / (1 + taxRate / 100));
+                    const isOut = product.stock === 0;
                     return (
-                      <div className="bill-summary" style={{ marginBottom: 12 }}>
-                        <div className="summary-line"><span>Subtotal:</span><span>{formatCurrency(subtotal)}</span></div>
-                        {discountAmount > 0 && <div className="summary-line"><span>Discount ({quotDiscount}%):</span><span className="discount-text">- {formatCurrency(discountAmount)}</span></div>}
-                        {settings.tax_enabled && <div className="summary-line"><span>GST ({settings.tax_percent}%):</span><span>{formatCurrency(taxAmount)}</span></div>}
-                        <div className="summary-line total-line"><span>Total:</span><span>{formatCurrency(total)}</span></div>
+                      <div key={product.id}
+                        onClick={() => !isOut && addToQuotCart(product)}
+                        style={{
+                          display:'flex', flexDirection:'column', justifyContent:'space-between',
+                          height:175, padding:12, borderRadius:8, border:'1px solid var(--border)',
+                          background:'var(--bg-secondary)', opacity: isOut ? 0.55 : 1,
+                          cursor: isOut ? 'not-allowed' : 'pointer',
+                          transition:'all 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.07)'
+                        }}
+                        className="product-grid-box"
+                      >
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'start', marginBottom:3 }}>
+                            <span className="tag" style={{ background: getCategoryColor(product.category), fontSize:10, padding:'2px 5px', borderRadius:4, color:'#fff', fontWeight:600 }}>
+                              {product.category}
+                            </span>
+                            <span style={{ color: getStockStatus(product.stock).color, fontSize:10, fontWeight:'bold' }}>
+                              {getStockStatus(product.stock).text}
+                            </span>
+                          </div>
+                          <div style={{ fontWeight:600, fontSize:13, overflow:'hidden', textOverflow:'ellipsis', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', lineHeight:1.3, color:'var(--text)' }}>
+                            {product.name}
+                          </div>
+                        </div>
+                        <div style={{ marginTop:6, flexShrink:0 }}>
+                          <div style={{ fontSize:15, fontWeight:700, color:'var(--accent)' }}>
+                            {formatCurrency(product.price)}
+                          </div>
+                          {settings.tax_enabled && taxRate > 0 && (
+                            <div style={{ fontSize:10, color:'var(--text-secondary)', display:'flex', gap:4, alignItems:'center', marginTop:2 }}>
+                              <span style={{ background:'var(--primary)', color:'#fff', padding:'1px 5px', borderRadius:8, fontWeight:600 }}>{taxRate}% GST</span>
+                              <span>₹{taxAmt.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Stock: {product.stock}</div>
+                        </div>
                       </div>
                     );
-                  })()}
-                  <button className="btn btn-primary" onClick={handleCreateQuotation}>📋 Save Quotation</button>
-                </>
-              )}
+                  })}
+                </div>
+              </div>
             </div>
 
-            <div className="card" style={{ marginTop: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 className="card-title" style={{ margin: 0 }}>All Quotations</h3>
-                <input className="input" placeholder="Search quotations..." value={quotSearch} onChange={e => setQuotSearch(e.target.value)} style={{ width: 220 }} />
+            {/* ═══ CART COLUMN ═══ */}
+            <div style={{ width:290, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'1px solid var(--border)', height:'100%', overflow:'hidden' }}>
+              <div style={{ padding:'10px 12px', borderBottom:'2px solid var(--accent)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+                <span style={{ fontWeight:'bold', fontSize:13, color:'var(--accent)' }}>🛒 Items ({quotCart.reduce((s,i)=>s+i.quantity,0)})</span>
+                {quotCart.length > 0 && (
+                  <button className="btn btn-sm btn-danger" style={{ fontSize:11, padding:'2px 8px' }}
+                    onClick={() => { if(window.confirm('Clear items?')) setQuotCart([]); }}>
+                    Clear
+                  </button>
+                )}
               </div>
-              {quotations.filter(q => !quotSearch || q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) || (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase())).length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No quotations found</div>
-              ) : (
-                <div className="table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr><th>Quotation No</th><th>Customer</th><th>Items</th><th>Total</th><th>Valid Until</th><th>Status</th><th>Actions</th></tr>
-                    </thead>
-                    <tbody>
-                      {quotations
-                        .filter(q => !quotSearch || q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) || (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase()))
-                        .map(q => (
-                          <tr key={q.id}>
-                            <td><strong>{q.quotation_no}</strong></td>
-                            <td>{q.customer_name || '-'}<br/><span className="sub-text">{q.customer_phone}</span></td>
-                            <td>{q.items.length} items</td>
-                            <td className="amount-text">{formatCurrency(q.total)}</td>
-                            <td>{q.valid_until ? new Date(q.valid_until).toLocaleDateString() : '-'}</td>
-                            <td>
-                              <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 12, background: q.status === 'converted' ? 'var(--success)' : q.status === 'expired' ? 'var(--danger)' : 'var(--warning)', color: 'white' }}>
-                                {q.status}
-                              </span>
-                            </td>
-                            <td>
-                              <div className="table-actions">
-                                <button className="btn btn-sm" onClick={() => setShowQuotation(q)}>View</button>
-                                {q.status === 'pending' && (
-                                  <button className="btn btn-sm btn-primary" onClick={() => handleConvertQuotation(q)}>→ POS</button>
-                                )}
-                                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteQuotation(q.id)}>Delete</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
+              <div style={{ flex:1, overflowY:'auto', padding:'8px 10px' }}>
+                {quotCart.length === 0 ? (
+                  <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'24px 8px', fontSize:12 }}>No items added</div>
+                ) : quotCart.map(item => {
+                  const taxRate = item.tax_percent !== undefined ? item.tax_percent : settings.tax_percent;
+                  const lineTotal = item.price * item.quantity;
+                  const taxAmt = settings.tax_enabled ? lineTotal - (lineTotal / (1 + taxRate / 100)) : 0;
+                  return (
+                    <div key={item.product_id}
+                      style={{ background:'var(--bg-tertiary)', border:'1px solid var(--border)', borderRadius:6, padding:'8px', marginBottom:7 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+                        <span style={{ fontWeight:600, fontSize:12, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</span>
+                        <button style={{ background:'var(--danger)', color:'#fff', border:'none', borderRadius:3, width:18, height:18, fontSize:10, cursor:'pointer', flexShrink:0, marginLeft:4 }}
+                          onClick={() => setQuotCart(quotCart.filter(i => i.product_id !== item.product_id))}>✕</button>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                          <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }}
+                            onClick={() => setQuotCart(quotCart.map(i => i.product_id === item.product_id ? { ...i, quantity: Math.max(1, i.quantity-1) } : i))}>−</button>
+                          <input className="input qty-input" type="number" value={item.quantity}
+                            onChange={e => setQuotCart(quotCart.map(i => i.product_id === item.product_id ? { ...i, quantity: parseInt(e.target.value)||1 } : i))}
+                            style={{ width:40, textAlign:'center', padding:'2px', fontSize:12 }} />
+                          <button className="btn btn-sm" style={{ padding:'1px 7px', fontSize:13 }}
+                            onClick={() => setQuotCart(quotCart.map(i => i.product_id === item.product_id ? { ...i, quantity: i.quantity+1 } : i))}>+</button>
+                        </div>
+                        <span style={{ color:'var(--accent)', fontWeight:'bold', fontSize:12 }}>{formatCurrency(lineTotal)}</span>
+                      </div>
+                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>₹{item.price} × {item.quantity}</div>
+                      {settings.tax_enabled && taxRate > 0 && (
+                        <div style={{ fontSize:10, color:'var(--text-secondary)', marginTop:1 }}>
+                          GST {taxRate}%: <span style={{ color:'var(--primary)' }}>+₹{taxAmt.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ═══ QUOTATION DETAILS COLUMN ═══ */}
+            <div style={{ width:270, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'2px solid var(--accent)', height:'100%', overflowY:'auto', overflowX:'hidden' }}>
+              <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', flexShrink:0, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontWeight:'bold', fontSize:13, color:'var(--accent)' }}>📋 Quotation</span>
+                <button className="btn btn-sm" style={{ fontSize:11 }} onClick={() => { setShowQuotHistory(true); fetchQuotations(); }}>
+                  🗂 History
+                </button>
+              </div>
+              <div style={{ padding:'10px 14px', display:'flex', flexDirection:'column', gap:10, flex:1 }}>
+
+                {/* Discount */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>DISCOUNT</div>
+                  <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
+                    {DISCOUNT_OPTIONS.map(disc => (
+                      <button key={disc}
+                        className={`btn btn-sm ${quotDiscount===disc && !customDiscount ? 'active' : ''}`}
+                        style={{ padding:'3px 8px', fontSize:11 }}
+                        onClick={() => { setQuotDiscount(disc); setCustomDiscount(''); }}>
+                        {disc}%
+                      </button>
+                    ))}
+                  </div>
+                  <input className="input" placeholder="Custom %" type="number"
+                    value={customDiscount} style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => { setCustomDiscount(e.target.value); setQuotDiscount(parseFloat(e.target.value)||0); }} />
                 </div>
-              )}
+
+                {/* Bill Summary */}
+                {quotCart.length > 0 && (() => {
+                  const { subtotal, discountAmount, taxAmount, total } = calculateQuotation();
+                  return (
+                    <div style={{ background:'var(--bg-tertiary)', borderRadius:6, padding:'8px 10px' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                        <span style={{ color:'var(--text-secondary)' }}>Sub Total</span>
+                        <span>{formatCurrency(subtotal)}</span>
+                      </div>
+                      {discountAmount > 0 && (
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                          <span style={{ color:'var(--text-secondary)' }}>Discount</span>
+                          <span style={{ color:'var(--success)' }}>−{formatCurrency(discountAmount)}</span>
+                        </div>
+                      )}
+                      {settings.tax_enabled && (
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontSize:12 }}>
+                          <span style={{ color:'var(--text-secondary)' }}>GST</span>
+                          <span>{formatCurrency(taxAmount)}</span>
+                        </div>
+                      )}
+                      <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0 2px', fontSize:15, fontWeight:'bold', borderTop:'2px solid var(--accent)', marginTop:4 }}>
+                        <span style={{ color:'var(--accent)' }}>Total</span>
+                        <span style={{ color:'var(--accent)' }}>{formatCurrency(total)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Customer Name */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>CUSTOMER NAME</div>
+                  <input className="input" placeholder="Customer Name" value={quotCustomerName}
+                    style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => setQuotCustomerName(e.target.value)} />
+                </div>
+
+                {/* Customer Mobile */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>CUSTOMER MOBILE</div>
+                  <input className="input" placeholder="Phone Number" value={quotCustomerPhone}
+                    style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => setQuotCustomerPhone(e.target.value)} />
+                </div>
+
+                {/* Valid Until */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>VALID UNTIL</div>
+                  <input className="input date-input" type="date" value={quotValidUntil}
+                    style={{ fontSize:12, padding:'5px 8px' }}
+                    onChange={e => setQuotValidUntil(e.target.value)} />
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, marginBottom:4 }}>NOTES</div>
+                  <textarea className="input" placeholder="Notes (optional)" value={quotNotes}
+                    rows={2}
+                    style={{ fontSize:12, padding:'5px 8px', resize:'none', width:'100%' }}
+                    onChange={e => setQuotNotes(e.target.value)} />
+                </div>
+
+                {/* Create Quotation */}
+                <div style={{ paddingTop:6, borderTop:'1px solid var(--border)' }}>
+                  <button className="btn btn-primary"
+                    style={{ width:'100%', fontSize:13, fontWeight:'bold', padding:'10px 0' }}
+                    onClick={handleCreateQuotation}
+                    disabled={quotCart.length === 0}>
+                    📋 Create Quotation
+                  </button>
+                </div>
+
+              </div>
             </div>
           </div>
         )}
@@ -4523,6 +4658,80 @@ const BillingPOS = () => {
             <div className="modal-actions">
               <button className="btn" onClick={() => setEditingCustomer(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleUpdateCustomerBalance} data-testid="save-balance-btn">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quotation History Slide-Over Panel */}
+      {showQuotHistory && (
+        <div className="modal-overlay" onClick={() => setShowQuotHistory(false)}>
+          <div className="modal" style={{ maxWidth: 820, width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>🗂 Saved Quotations</h3>
+              <input className="input" placeholder="Search..." value={quotSearch}
+                onChange={e => setQuotSearch(e.target.value)}
+                style={{ width: 200, fontSize: 12, padding: '5px 8px' }} />
+              <button className="btn btn-sm btn-danger" onClick={() => setShowQuotHistory(false)}>✕ Close</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+              {quotations.filter(q => !quotSearch ||
+                q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) ||
+                (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase())
+              ).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No quotations found</div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Quotation No</th>
+                        <th>Customer</th>
+                        <th>Items</th>
+                        <th>Total</th>
+                        <th>Valid Until</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quotations
+                        .filter(q => !quotSearch ||
+                          q.quotation_no.toLowerCase().includes(quotSearch.toLowerCase()) ||
+                          (q.customer_name || '').toLowerCase().includes(quotSearch.toLowerCase())
+                        )
+                        .map(q => (
+                          <tr key={q.id}>
+                            <td><strong>{q.quotation_no}</strong></td>
+                            <td>
+                              {q.customer_name || '-'}
+                              {q.customer_phone && <div className="sub-text">{q.customer_phone}</div>}
+                            </td>
+                            <td>{q.items.length} items</td>
+                            <td className="amount-text">{formatCurrency(q.total)}</td>
+                            <td>{q.valid_until ? new Date(q.valid_until).toLocaleDateString() : '-'}</td>
+                            <td>
+                              <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600,
+                                background: q.status === 'converted' ? 'var(--success)' : q.status === 'expired' ? 'var(--danger)' : 'var(--warning)',
+                                color: 'white' }}>
+                                {q.status}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="table-actions">
+                                <button className="btn btn-sm" onClick={() => { setShowQuotation(q); setShowQuotHistory(false); }}>View</button>
+                                {q.status === 'pending' && (
+                                  <button className="btn btn-sm btn-primary" onClick={() => { handleConvertQuotation(q); setShowQuotHistory(false); }}>→ POS</button>
+                                )}
+                                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteQuotation(q.id)}>Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>
