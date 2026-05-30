@@ -33,6 +33,7 @@ const VIEWS = {
   THERMAL_PRINT: 'thermal_print',
   BARCODE_LABELS: 'barcode_labels',
   TAX_GST: 'tax_gst',
+  HOLD_BILLS: 'hold_bills',
 };
 
 const TAX_RATES = [0, 5, 12, 18, 28];
@@ -45,6 +46,16 @@ const BillingPOS = () => {
   const [heldCarts, setHeldCarts] = useState([]);
   const [bills, setBills] = useState([]);
   const [customers, setCustomers] = useState([]);
+  // Hold prompt modal
+  const [showHoldPrompt, setShowHoldPrompt] = useState(false);
+  const [holdPromptName, setHoldPromptName] = useState('');
+  const [holdPromptPhone, setHoldPromptPhone] = useState('');
+  // Hold bills page
+  const [holdSearch, setHoldSearch] = useState('');
+  const [holdDateFrom, setHoldDateFrom] = useState('');
+  const [holdDateTo, setHoldDateTo] = useState('');
+  const [editHeldCart, setEditHeldCart] = useState(null);
+  const [holdCheckoutCart, setHoldCheckoutCart] = useState(null);
   const [settings, setSettings] = useState({
     shop_name: 'My Shop',
     software_name: 'POS System',
@@ -272,6 +283,7 @@ const BillingPOS = () => {
     if (view === VIEWS.LOYALTY) fetchLoyaltySettings();
     if (view === VIEWS.ANALYTICS) fetchAnalytics();
     if (view === VIEWS.TAX_GST) fetchTaxGstData();
+    if (view === VIEWS.HOLD_BILLS) loadData();
     if (view === VIEWS.BARCODE_LABELS) setBarcodeProducts(products);
   }, [view]);
 
@@ -837,26 +849,31 @@ const BillingPOS = () => {
     }
   };
 
-  const handleHoldCart = async () => {
-    if (cart.length === 0) {
-      showNotification('Cart is empty', 'error');
-      return;
-    }
+  const handleHoldCart = () => {
+    if (cart.length === 0) { showNotification('Cart is empty', 'error'); return; }
+    setHoldPromptName(customerName || '');
+    setHoldPromptPhone(customerPhone || '');
+    setShowHoldPrompt(true);
+  };
 
+  const confirmHoldCart = async () => {
     try {
       await axios.post(`${API}/carts/hold`, {
         items: cart,
-        customer_name: customerName,
-        customer_phone: customerPhone
+        customer_name: holdPromptName,
+        customer_phone: holdPromptPhone
       });
-      showNotification('Cart held successfully', 'success');
+      showNotification('Bill put on hold', 'success');
+      setShowHoldPrompt(false);
+      setHoldPromptName('');
+      setHoldPromptPhone('');
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
+      setDiscountPercent(0);
+      setCustomDiscount('');
       loadData();
-    } catch (error) {
-      showNotification('Error holding cart', 'error');
-    }
+    } catch (error) { showNotification('Error holding cart', 'error'); }
   };
 
   const handleResumeCart = async (heldCart) => {
@@ -866,10 +883,110 @@ const BillingPOS = () => {
     try {
       await axios.delete(`${API}/carts/held/${heldCart.id}`);
       loadData();
+      setView(VIEWS.POS);
       showNotification('Cart resumed', 'success');
-    } catch (error) {
-      showNotification('Error resuming cart', 'error');
-    }
+    } catch (error) { showNotification('Error resuming cart', 'error'); }
+  };
+
+  const handleDeleteHeldCart = async (id) => {
+    if (!window.confirm('Delete this held bill?')) return;
+    try {
+      await axios.delete(`${API}/carts/held/${id}`);
+      loadData();
+      showNotification('Held bill deleted', 'success');
+    } catch (e) { showNotification('Error deleting held bill', 'error'); }
+  };
+
+  const handleUpdateHeldCart = async () => {
+    if (!editHeldCart) return;
+    try {
+      await axios.delete(`${API}/carts/held/${editHeldCart.id}`);
+      await axios.post(`${API}/carts/hold`, {
+        items: editHeldCart.items,
+        customer_name: editHeldCart.customer_name,
+        customer_phone: editHeldCart.customer_phone
+      });
+      setEditHeldCart(null);
+      loadData();
+      showNotification('Held bill updated', 'success');
+    } catch (e) { showNotification('Error updating held bill', 'error'); }
+  };
+
+  const exportHeldCartsExcel = () => {
+    const filtered = getFilteredHeldCarts();
+    const wb = XLSX.utils.book_new();
+    const summaryData = filtered.map(hc => ({
+      'Customer Name': hc.customer_name || '-',
+      'Customer Phone': hc.customer_phone || '-',
+      'Items': hc.items.length,
+      'Total Qty': hc.items.reduce((s, i) => s + i.quantity, 0),
+      'Subtotal (₹)': hc.items.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2),
+      'Held At': new Date(hc.held_at).toLocaleString(),
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Hold Bills');
+    const itemData = [];
+    filtered.forEach(hc => {
+      hc.items.forEach(item => {
+        itemData.push({
+          'Customer': hc.customer_name || '-',
+          'Phone': hc.customer_phone || '-',
+          'Product': item.name,
+          'Price': item.price,
+          'Qty': item.quantity,
+          'Total': (item.price * item.quantity).toFixed(2),
+          'GST %': item.tax_percent || 18,
+          'Held At': new Date(hc.held_at).toLocaleString(),
+        });
+      });
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemData), 'Hold Items');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf]), `hold-bills-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportHeldCartsPDF = () => {
+    const filtered = getFilteredHeldCarts();
+    const win = window.open('', '_blank');
+    const rows = filtered.map(hc => {
+      const subtotal = hc.items.reduce((s, i) => s + i.price * i.quantity, 0);
+      const itemList = hc.items.map(i => `${i.name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br/>');
+      return `<tr>
+        <td>${hc.customer_name || '-'}</td>
+        <td>${hc.customer_phone || '-'}</td>
+        <td>${hc.items.length} items<br/><small style="color:#666">${itemList}</small></td>
+        <td>₹${subtotal.toFixed(2)}</td>
+        <td>${new Date(hc.held_at).toLocaleString()}</td>
+      </tr>`;
+    }).join('');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/>
+      <title>Hold Bills</title>
+      <style>
+        body{font-family:Arial,sans-serif;margin:20px;font-size:12px;}
+        h1{font-size:18px;text-align:center;}
+        table{width:100%;border-collapse:collapse;margin-top:12px;}
+        th,td{border:1px solid #ddd;padding:7px 9px;text-align:left;vertical-align:top;}
+        th{background:#f0f0f0;font-weight:bold;}
+        .meta{text-align:center;color:#888;margin-bottom:10px;font-size:11px;}
+      </style></head><body>
+      <h1>${settings.shop_name || 'Shop'} — Hold Bills Report</h1>
+      <div class="meta">Generated: ${new Date().toLocaleString()} | Total held: ${filtered.length}</div>
+      <table><thead><tr><th>Customer</th><th>Phone</th><th>Items</th><th>Subtotal</th><th>Held At</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      </body></html>`);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); };
+  };
+
+  const getFilteredHeldCarts = () => {
+    return heldCarts.filter(hc => {
+      const matchSearch = !holdSearch ||
+        (hc.customer_name || '').toLowerCase().includes(holdSearch.toLowerCase()) ||
+        (hc.customer_phone || '').includes(holdSearch);
+      const heldDate = new Date(hc.held_at);
+      const matchFrom = !holdDateFrom || heldDate >= new Date(holdDateFrom);
+      const matchTo = !holdDateTo || heldDate <= new Date(holdDateTo + 'T23:59:59');
+      return matchSearch && matchFrom && matchTo;
+    });
   };
 
   const handleAddProduct = async () => {
@@ -1632,6 +1749,7 @@ const BillingPOS = () => {
           {[
             { id: VIEWS.DASHBOARD, icon: '🏠', label: 'Dashboard' },
             { id: VIEWS.POS, icon: '🛒', label: 'Point of Sale' },
+            { id: VIEWS.HOLD_BILLS, icon: '⏸️', label: `Hold Bills${heldCarts.length > 0 ? ` (${heldCarts.length})` : ''}` },
             { id: VIEWS.INVENTORY, icon: '📦', label: 'Inventory' },
             { id: VIEWS.STOCK_ADJUSTMENTS, icon: '🔧', label: 'Stock Adjust' },
             { id: VIEWS.QUOTATIONS, icon: '📋', label: 'Quotations' },
@@ -1847,23 +1965,21 @@ const BillingPOS = () => {
             <div style={{ width:290, flexShrink:0, display:'flex', flexDirection:'column', background:'var(--bg-secondary)', borderLeft:'1px solid var(--border)', height:'100%', overflow:'hidden' }}>
               <div style={{ padding:'10px 12px', borderBottom:'2px solid var(--accent)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
                 <span style={{ fontWeight:'bold', fontSize:13, color:'var(--accent)' }}>🛒 Cart ({cart.reduce((s,i)=>s+i.quantity,0)})</span>
-                {cart.length > 0 && (
-                  <button className="btn btn-sm btn-danger" style={{ fontSize:11, padding:'2px 8px' }}
-                    onClick={() => { if(window.confirm('Clear bill?')){ setCart([]); setDiscountPercent(0); setCustomDiscount(''); setCustomerPaid(''); setCustomerName(''); setCustomerPhone(''); setLoyaltyDiscount(0); setRedeemPoints(''); setLoyaltyInfo(null); showNotification('Bill cleared','success'); } }}>
-                    Clear
-                  </button>
-                )}
-              </div>
-              {heldCarts.length > 0 && (
-                <div style={{ padding:'6px 12px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-                  <div style={{ fontSize:10, fontWeight:'bold', color:'var(--accent)', marginBottom:3 }}>HELD ({heldCarts.length})</div>
-                  {heldCarts.map(hc => (
-                    <button key={hc.id} data-testid={`resume-cart-${hc.id}`} className="btn held-cart-btn" onClick={() => handleResumeCart(hc)}>
-                      {hc.customer_name || 'Unnamed'} - {hc.items.length} items
+                <div style={{ display:'flex', gap:5 }}>
+                  {heldCarts.length > 0 && (
+                    <button className="btn btn-sm" style={{ fontSize:11, padding:'2px 8px' }}
+                      onClick={() => setView(VIEWS.HOLD_BILLS)}>
+                      ⏸️ {heldCarts.length} Held
                     </button>
-                  ))}
+                  )}
+                  {cart.length > 0 && (
+                    <button className="btn btn-sm btn-danger" style={{ fontSize:11, padding:'2px 8px' }}
+                      onClick={() => { if(window.confirm('Clear bill?')){ setCart([]); setDiscountPercent(0); setCustomDiscount(''); setCustomerPaid(''); setCustomerName(''); setCustomerPhone(''); setLoyaltyDiscount(0); setRedeemPoints(''); setLoyaltyInfo(null); showNotification('Bill cleared','success'); } }}>
+                      Clear
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
               <div style={{ flex:1, overflowY:'auto', padding:'8px 10px' }}>
                 {cart.length === 0 ? (
                   <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'24px 8px', fontSize:12 }}>Empty cart</div>
@@ -2013,6 +2129,140 @@ const BillingPOS = () => {
               </div>
             </div>
 
+          </div>
+        )}
+
+        {/* ═══ HOLD BILLS PAGE ═══ */}
+        {view === VIEWS.HOLD_BILLS && (
+          <div className="content-view">
+            {/* Header */}
+            <div className="view-header">
+              <h2 className="section-title">⏸️ Hold Bills{heldCarts.length > 0 ? ` (${heldCarts.length})` : ''}</h2>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn" onClick={loadData}>🔄 Refresh</button>
+                <button className="btn btn-primary" onClick={exportHeldCartsExcel} disabled={heldCarts.length === 0}>📊 Export Excel</button>
+                <button className="btn" onClick={exportHeldCartsPDF} disabled={heldCarts.length === 0}>📄 Export PDF</button>
+              </div>
+            </div>
+
+            {/* Filters: Search + Date Range */}
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16, alignItems:'center' }}>
+              <input className="input" placeholder="🔍 Search by customer name or phone..."
+                value={holdSearch} onChange={e => setHoldSearch(e.target.value)}
+                style={{ flex:1, minWidth:200 }} />
+              <span style={{ color:'var(--text-secondary)', fontSize:13 }}>📅 From</span>
+              <input className="input date-input" type="date" value={holdDateFrom}
+                onChange={e => setHoldDateFrom(e.target.value)} style={{ width:150 }} />
+              <span style={{ color:'var(--text-secondary)', fontSize:13 }}>To</span>
+              <input className="input date-input" type="date" value={holdDateTo}
+                onChange={e => setHoldDateTo(e.target.value)} style={{ width:150 }} />
+              {(holdSearch || holdDateFrom || holdDateTo) && (
+                <button className="btn btn-sm" onClick={() => { setHoldSearch(''); setHoldDateFrom(''); setHoldDateTo(''); }}>✕ Clear</button>
+              )}
+            </div>
+
+            {/* Summary Cards */}
+            <div className="stats-grid" style={{ marginBottom:16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Total Held Bills</div>
+                <div className="stat-value">{getFilteredHeldCarts().length}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Items on Hold</div>
+                <div className="stat-value">{getFilteredHeldCarts().reduce((s, hc) => s + hc.items.reduce((ss, i) => ss + i.quantity, 0), 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Hold Value</div>
+                <div className="stat-value amount-text">
+                  {formatCurrency(getFilteredHeldCarts().reduce((s, hc) => s + hc.items.reduce((ss, i) => ss + i.price * i.quantity, 0), 0))}
+                </div>
+              </div>
+            </div>
+
+            {/* Hold Bills Table */}
+            {getFilteredHeldCarts().length === 0 ? (
+              <div style={{ textAlign:'center', padding:60, color:'var(--text-muted)' }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>⏸️</div>
+                <div style={{ fontSize:16 }}>No held bills found</div>
+                <div style={{ fontSize:13, marginTop:6 }}>Go to POS and click "Hold" to put a bill on hold</div>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Customer</th>
+                      <th>Phone</th>
+                      <th>Items</th>
+                      <th>Products</th>
+                      <th>Subtotal</th>
+                      <th>Held At</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getFilteredHeldCarts().map((hc, idx) => {
+                      const subtotal = hc.items.reduce((s, i) => s + i.price * i.quantity, 0);
+                      return (
+                        <tr key={hc.id}>
+                          <td style={{ color:'var(--text-muted)', fontSize:12 }}>{idx + 1}</td>
+                          <td>
+                            <strong>{hc.customer_name || <span style={{ color:'var(--text-muted)' }}>—</span>}</strong>
+                          </td>
+                          <td style={{ color:'var(--text-secondary)' }}>{hc.customer_phone || '—'}</td>
+                          <td>
+                            <span style={{ background:'var(--accent)', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:12, fontWeight:600 }}>
+                              {hc.items.reduce((s, i) => s + i.quantity, 0)} qty
+                            </span>
+                          </td>
+                          <td style={{ maxWidth:220 }}>
+                            <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.5 }}>
+                              {hc.items.slice(0, 3).map(i => (
+                                <div key={i.product_id}>{i.name} × {i.quantity}</div>
+                              ))}
+                              {hc.items.length > 3 && (
+                                <div style={{ color:'var(--text-muted)', fontSize:11 }}>+{hc.items.length - 3} more…</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="amount-text" style={{ fontWeight:600 }}>{formatCurrency(subtotal)}</td>
+                          <td style={{ fontSize:12, color:'var(--text-secondary)', whiteSpace:'nowrap' }}>
+                            {new Date(hc.held_at).toLocaleDateString()}<br/>
+                            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{new Date(hc.held_at).toLocaleTimeString()}</span>
+                          </td>
+                          <td>
+                            <div className="table-actions" style={{ gap:5 }}>
+                              {/* Continue to POS */}
+                              <button className="btn btn-sm btn-primary" title="Continue in POS"
+                                onClick={() => handleResumeCart(hc)}>
+                                ▶ POS
+                              </button>
+                              {/* Bill directly */}
+                              <button className="btn btn-sm" title="Quick Bill"
+                                style={{ background:'var(--success)', color:'#fff', border:'none' }}
+                                onClick={() => setHoldCheckoutCart(hc)}>
+                                🧾 Bill
+                              </button>
+                              {/* Edit */}
+                              <button className="btn btn-sm" title="Edit"
+                                onClick={() => setEditHeldCart({ ...hc, items: hc.items.map(i => ({ ...i })) })}>
+                                ✏️ Edit
+                              </button>
+                              {/* Delete */}
+                              <button className="btn btn-sm btn-danger" title="Delete"
+                                onClick={() => handleDeleteHeldCart(hc.id)}>
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -4662,6 +4912,209 @@ const BillingPOS = () => {
           </div>
         </div>
       )}
+
+      {/* ── Hold Prompt Modal: quick customer name + phone before holding ── */}
+      {showHoldPrompt && (
+        <div className="modal-overlay" onClick={() => setShowHoldPrompt(false)}>
+          <div className="modal" style={{ maxWidth:380 }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'16px 20px 12px', borderBottom:'1px solid var(--border)' }}>
+              <h3 style={{ margin:0, fontSize:15 }}>⏸️ Hold Bill</h3>
+            </div>
+            <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ fontSize:13, color:'var(--text-secondary)' }}>
+                {cart.length} item(s) • {formatCurrency(calculateBill().total)}
+              </div>
+              <div>
+                <label style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', display:'block', marginBottom:4 }}>CUSTOMER NAME</label>
+                <input className="input" placeholder="Customer name (optional)"
+                  value={holdPromptName} onChange={e => setHoldPromptName(e.target.value)}
+                  autoFocus />
+              </div>
+              <div>
+                <label style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', display:'block', marginBottom:4 }}>PHONE NUMBER</label>
+                <input className="input" placeholder="Phone number (optional)"
+                  value={holdPromptPhone} onChange={e => setHoldPromptPhone(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && confirmHoldCart()} />
+              </div>
+              <div style={{ display:'flex', gap:8, paddingTop:4 }}>
+                <button className="btn" style={{ flex:1 }} onClick={() => setShowHoldPrompt(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex:2, fontWeight:'bold' }} onClick={confirmHoldCart}>⏸️ Hold Bill</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Held Cart Modal ── */}
+      {editHeldCart && (
+        <div className="modal-overlay" onClick={() => setEditHeldCart(null)}>
+          <div className="modal" style={{ maxWidth:600, width:'95vw' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <h3 style={{ margin:0, fontSize:15 }}>✏️ Edit Held Bill</h3>
+              <button className="btn btn-sm btn-danger" onClick={() => setEditHeldCart(null)}>✕</button>
+            </div>
+            <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:12 }}>
+              {/* Customer info */}
+              <div style={{ display:'flex', gap:10 }}>
+                <div style={{ flex:1 }}>
+                  <label style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', display:'block', marginBottom:4 }}>CUSTOMER NAME</label>
+                  <input className="input" value={editHeldCart.customer_name}
+                    onChange={e => setEditHeldCart({ ...editHeldCart, customer_name: e.target.value })} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <label style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', display:'block', marginBottom:4 }}>PHONE</label>
+                  <input className="input" value={editHeldCart.customer_phone}
+                    onChange={e => setEditHeldCart({ ...editHeldCart, customer_phone: e.target.value })} />
+                </div>
+              </div>
+              {/* Items table */}
+              <div style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)' }}>ITEMS</div>
+              <div className="table-container">
+                <table className="data-table">
+                  <thead><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+                  <tbody>
+                    {editHeldCart.items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td>{item.name}</td>
+                        <td>{formatCurrency(item.price)}</td>
+                        <td>
+                          <input type="number" className="input qty-input" min="1" value={item.quantity}
+                            style={{ width:60 }}
+                            onChange={e => setEditHeldCart({
+                              ...editHeldCart,
+                              items: editHeldCart.items.map((i, ii) => ii === idx ? { ...i, quantity: parseInt(e.target.value) || 1 } : i)
+                            })} />
+                        </td>
+                        <td className="amount-text">{formatCurrency(item.price * item.quantity)}</td>
+                        <td>
+                          <button className="btn btn-sm btn-danger"
+                            onClick={() => setEditHeldCart({ ...editHeldCart, items: editHeldCart.items.filter((_, ii) => ii !== idx) })}>
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ textAlign:'right', fontWeight:700, fontSize:14, color:'var(--accent)' }}>
+                Total: {formatCurrency(editHeldCart.items.reduce((s, i) => s + i.price * i.quantity, 0))}
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn" style={{ flex:1 }} onClick={() => setEditHeldCart(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex:2, fontWeight:'bold' }} onClick={handleUpdateHeldCart}>💾 Save Changes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Quick Bill from Hold Modal ── */}
+      {holdCheckoutCart && (() => {
+        const subtotal = holdCheckoutCart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+        const taxAmount = settings.tax_enabled ? subtotal * (settings.tax_percent / 100) : 0;
+        const total = subtotal + taxAmount;
+        return (
+          <div className="modal-overlay" onClick={() => setHoldCheckoutCart(null)}>
+            <div className="modal" style={{ maxWidth:460, width:'95vw' }} onClick={e => e.stopPropagation()}>
+              <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <h3 style={{ margin:0, fontSize:15 }}>🧾 Bill — {holdCheckoutCart.customer_name || 'Guest'}</h3>
+                <button className="btn btn-sm btn-danger" onClick={() => setHoldCheckoutCart(null)}>✕</button>
+              </div>
+              <div style={{ padding:'14px 18px' }}>
+                {/* Items summary */}
+                <div className="table-container" style={{ marginBottom:12 }}>
+                  <table className="data-table">
+                    <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>GST</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {holdCheckoutCart.items.map((item, i) => {
+                        const taxRate = item.tax_percent || settings.tax_percent || 18;
+                        const lineTotal = item.price * item.quantity;
+                        const gstAmt = settings.tax_enabled ? lineTotal - lineTotal / (1 + taxRate / 100) : 0;
+                        return (
+                          <tr key={i}>
+                            <td>{item.name}</td>
+                            <td>{item.quantity}</td>
+                            <td>{formatCurrency(item.price)}</td>
+                            <td style={{ color:'var(--text-secondary)', fontSize:11 }}>
+                              {settings.tax_enabled ? `${taxRate}%` : '-'}
+                              {settings.tax_enabled && <div>{formatCurrency(gstAmt)}</div>}
+                            </td>
+                            <td className="amount-text">{formatCurrency(lineTotal)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Totals */}
+                <div style={{ background:'var(--bg-tertiary)', borderRadius:6, padding:'10px 12px', marginBottom:12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'2px 0' }}>
+                    <span style={{ color:'var(--text-secondary)' }}>Subtotal</span>
+                    <span>{formatCurrency(subtotal)}</span>
+                  </div>
+                  {settings.tax_enabled && (
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'2px 0' }}>
+                      <span style={{ color:'var(--text-secondary)' }}>GST ({settings.tax_percent}%)</span>
+                      <span>{formatCurrency(taxAmount)}</span>
+                    </div>
+                  )}
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:16, fontWeight:'bold', borderTop:'2px solid var(--accent)', marginTop:6, paddingTop:6, color:'var(--accent)' }}>
+                    <span>Total</span>
+                    <span>{formatCurrency(total)}</span>
+                  </div>
+                </div>
+                {/* Payment method quick select */}
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', marginBottom:6 }}>PAYMENT METHOD</div>
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                    {PAYMENT_METHODS.map(m => (
+                      <button key={m}
+                        className={`btn btn-sm ${paymentMethod === m ? 'active' : ''}`}
+                        onClick={() => setPaymentMethod(m)}>{m}</button>
+                    ))}
+                  </div>
+                </div>
+                {/* Generate Bill button */}
+                <div style={{ display:'flex', gap:8 }}>
+                  <button className="btn" style={{ flex:1 }} onClick={() => setHoldCheckoutCart(null)}>Cancel</button>
+                  <button className="btn btn-primary" style={{ flex:2, fontWeight:'bold', fontSize:14 }}
+                    onClick={async () => {
+                      try {
+                        const invoiceNo = generateInvoiceNo();
+                        const billData = {
+                          invoice_no: invoiceNo,
+                          items: holdCheckoutCart.items,
+                          subtotal,
+                          discount_percent: 0,
+                          discount_amount: 0,
+                          tax_amount: taxAmount,
+                          tax_percent: settings.tax_percent,
+                          total,
+                          payment_method: paymentMethod,
+                          cash_received: total,
+                          change_given: 0,
+                          balance_amount: 0,
+                          settled: true,
+                          customer_name: holdCheckoutCart.customer_name,
+                          customer_phone: holdCheckoutCart.customer_phone
+                        };
+                        const res = await axios.post(`${API}/bills`, billData);
+                        await axios.delete(`${API}/carts/held/${holdCheckoutCart.id}`);
+                        setHoldCheckoutCart(null);
+                        setShowReceipt(res.data);
+                        loadData();
+                        showNotification('Bill generated!', 'success');
+                      } catch (e) { showNotification('Error generating bill', 'error'); }
+                    }}>
+                    ✅ Generate Bill
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Quotation History Slide-Over Panel */}
       {showQuotHistory && (
