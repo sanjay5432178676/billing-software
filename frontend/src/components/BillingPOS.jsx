@@ -2057,7 +2057,6 @@ const BillingPOS = () => {
                   </div>
                 );
               })()}
-              </div>
             </div>
 
             {/* ═══ BILLING SUMMARY COLUMN ═══ */}
