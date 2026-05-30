@@ -767,10 +767,15 @@ const BillingPOS = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const discount = parseFloat(customDiscount) || discountPercent;
     const discountAmount = subtotal * (discount / 100);
-    const taxableAmount = subtotal - discountAmount;
-    const taxAmount = settings.tax_enabled ? taxableAmount * (settings.tax_percent / 100) : 0;
-    const total = taxableAmount + taxAmount;
-    
+    const taxAmount = settings.tax_enabled
+      ? cart.reduce((s, item) => {
+          const taxRate = item.tax_percent !== undefined ? item.tax_percent : settings.tax_percent;
+          const lineTotal = item.price * item.quantity;
+          const discountedLine = lineTotal - lineTotal * (discount / 100);
+          return s + (discountedLine - discountedLine / (1 + taxRate / 100));
+        }, 0)
+      : 0;
+    const total = subtotal - discountAmount + taxAmount;
     return { subtotal, discountAmount, taxAmount, total, discount };
   };
 
@@ -3518,6 +3523,31 @@ const BillingPOS = () => {
                   );
                 })}
               </div>
+              {/* Quotation cart running total */}
+              {quotCart.length > 0 && (() => {
+                const { subtotal, discountAmount, taxAmount, total } = calculateQuotation();
+                return (
+                  <div style={{ borderTop:'2px solid var(--accent)', padding:'8px 12px', flexShrink:0, background:'var(--bg-tertiary)' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-secondary)', marginBottom:2 }}>
+                      <span>Subtotal</span><span>{formatCurrency(subtotal)}</span>
+                    </div>
+                    {discountAmount > 0 && (
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--success)', marginBottom:2 }}>
+                        <span>Discount ({quotDiscount}%)</span><span>−{formatCurrency(discountAmount)}</span>
+                      </div>
+                    )}
+                    {settings.tax_enabled && (
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--text-secondary)', marginBottom:4 }}>
+                        <span>GST</span><span style={{ color:'var(--primary)', fontWeight:600 }}>+{formatCurrency(taxAmount)}</span>
+                      </div>
+                    )}
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, fontWeight:'bold', color:'var(--accent)', borderTop:'1px solid var(--border)', paddingTop:5 }}>
+                      <span>Total</span>
+                      <span>{formatCurrency(total)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ═══ QUOTATION DETAILS COLUMN ═══ */}
